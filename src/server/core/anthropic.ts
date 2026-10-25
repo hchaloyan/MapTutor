@@ -84,6 +84,11 @@ export const streamMessage: StreamMessage = async (params, key, onText, opts = {
 /** Maps an Anthropic SDK error to the HTTP error the user should see, or null for anything else. */
 export function anthropicError(err: unknown) {
   if (err instanceof Anthropic.AuthenticationError) return httpError(401, 'Your Anthropic API key was rejected.')
-  if (err instanceof Anthropic.APIError) return httpError(502, `Anthropic API error: ${err.message}`)
+  if (err instanceof Anthropic.APIError) {
+    const inner = (err.error as { error?: { type?: string; message?: string } } | undefined)?.error
+    if (err.status === 529 || inner?.type === 'overloaded_error') return httpError(502, 'Anthropic is overloaded right now. Try again in a moment.')
+    if (err.status === 429) return httpError(502, 'Anthropic is rate-limiting your key. Wait a minute and try again.')
+    return httpError(502, `Anthropic API error: ${inner?.message ?? err.message}`)
+  }
   return null
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { AppContext, type AppState, type KeyStatus } from './lib/app'
 import { getKey } from './lib/key'
 import { useRoute } from './lib/router'
+import { Goal } from './pages/Goal'
 import { Projects } from './pages/Projects'
 import { Welcome } from './pages/Welcome'
 
@@ -40,7 +41,7 @@ export function App() {
       {!key && !dismissed ? (
         <Welcome onDismiss={dismiss} />
       ) : route.name === 'goal' ? (
-        <p>Goal {route.goalId}</p>
+        <Goal key={route.goalId} goalId={route.goalId} />
       ) : (
         <Projects projectId={route.projectId} />
       )}

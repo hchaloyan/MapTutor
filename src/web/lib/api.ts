@@ -21,6 +21,34 @@ export type StudySummary = {
   counts: Record<NodeState, number>
   usage: Usage
 }
+export type StudyNode = {
+  id: string
+  label: string
+  kind: 'root' | 'derived' | 'goal'
+  description: string
+  strands: string[]
+  state: NodeState
+  everKnown: boolean
+  summary: string | null
+  evidence: { correct: number; total: number }
+}
+export type Strand = { strand: string; correct: number; total: number }
+export type Study = {
+  id: string
+  projectId: string
+  goal: string
+  title: string | null
+  phase: Phase
+  approach: string | null
+  focusNodeId: string | null
+  nodes: StudyNode[]
+  edges: { from: string; to: string }[]
+  strands: Strand[]
+  usage: Usage
+}
+// Card inputs and answers are the tool's own shapes; the card components read them.
+export type Card = { type: 'card'; toolUseId: string; name: 'quiz' | 'ask_user_question' | 'propose_graph'; input: any; answer: any; pending: boolean; createdAt: number }
+export type ThreadItem = { type: 'user' | 'assistant'; text: string; createdAt: number } | Card
 export type Project = { id: string; name: string; createdAt: number; files: FileInfo[]; studies: StudySummary[]; usage: Usage }
 
 export class ApiError extends Error {

@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk'
+import Anthropic from '@anthropic-ai/sdk'
 import type { CheckKey } from '../core/anthropic'
 import { httpError } from '../core/http'
 import type { HtmlToMarkdown } from '../routes/files'
@@ -131,8 +131,15 @@ function script(params: MessageStreamParams): Reply {
 
 /** A scripted tutor for building and testing the frontend without calling Claude. */
 export function fakeTutor({ delayMs }: { delayMs: number }) {
+  const failed = new Set<string>()
   const streamMessage: StreamMessage = async (params, _key, onText, opts = {}) => {
     const { signal } = opts
+    // A user message containing [fail] errors once, so the error line and Retry can be tried.
+    const said = blocksOf(params.messages.at(-1)!).find(b => b.type === 'text' && b.text?.includes('[fail]'))?.text
+    if (said && !failed.has(said)) {
+      failed.add(said)
+      throw new Anthropic.InternalServerError(529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 'Overloaded', new Headers())
+    }
     const wait = (ms: number) =>
       new Promise<void>((resolve, reject) => {
         if (signal?.aborted) return reject(new Error('Request was aborted.'))

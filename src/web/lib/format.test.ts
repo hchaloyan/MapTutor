@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { countLabel, fileBadge, formatBytes, goalName, masterySegments, phaseLabel, usedLabel } from './format'
+import { clampSplit, countLabel, fileBadge, formatBytes, goalName, masterySegments, phaseLabel, usedLabel } from './format'
 
 test('count labels', () => {
   expect([countLabel(0, 'file'), countLabel(1, 'goal'), countLabel(3, 'goal'), countLabel(0, 'goal')]).toEqual(['no files', '1 goal', '3 goals', 'no goals'])
@@ -42,4 +42,8 @@ test('file badges by kind and extension', () => {
 test('used label', () => {
   expect(usedLabel(5_662_310)).toBe('5.4 of 20 MB used')
   expect(usedLabel(0)).toBe('0 of 20 MB used')
+})
+
+test('split clamps to 25–75', () => {
+  expect([clampSplit(10), clampSplit(50), clampSplit(90)]).toEqual([25, 50, 75])
 })

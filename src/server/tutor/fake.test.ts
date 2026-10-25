@@ -112,3 +112,12 @@ test('the fake tutor streams in chunks and honours Stop', async () => {
   const stopped = streamMessage(params, 'sk-ant-x', () => controller.abort(), { signal: controller.signal })
   await expect(stopped).rejects.toThrow()
 })
+
+test('a message containing [fail] errors once, so Retry can be tried for free', async () => {
+  const t = await setup()
+  const first = await t.post('messages', { text: 'hello [fail]' })
+  expect(first.map(e => e.event)).toEqual(['error', 'done'])
+  expect(first[0].data.message).toBe('Anthropic is overloaded right now. Try again in a moment.')
+  const retried = await t.post('retry', {})
+  expect(retried.filter(e => e.event === 'card')).toHaveLength(1)
+})

@@ -28,3 +28,6 @@ export function fileBadge(f: { kind: 'pdf' | 'image' | 'text' | 'url'; name: str
   const [label, token] = BADGES[f.kind]
   return { label, color: `var(--badge-${token})` }
 }
+
+/** The graph pane's share of the goal screen, in percent. */
+export const clampSplit = (pct: number) => Math.min(75, Math.max(25, pct))
