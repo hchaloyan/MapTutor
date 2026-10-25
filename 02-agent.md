@@ -31,7 +31,7 @@ The prompt is fixed and identical for every user:
 
 The appendix also tells the tutor:
 
-- The current phase and its allowed tools.
+- How to read the `<study_state>` block (the current phase and its allowed tools live there, not in the system prompt).
 - That every probe quiz item needs a `strand`, and every quiz-check item needs a `nodeId`.
 - To settle the goal (the skill's 1b) before the level quiz (1a), because the strands to probe depend on the goal.
 - To put the prose approach in `propose_graph`'s `approach` field, not in chat.
@@ -102,7 +102,7 @@ Initial node states are computed by the app from probe evidence, not supplied by
 
 ## Tool loop
 
-1. The server calls the Messages API with the assembled context and the phase's allowed tools.
+1. The server calls the Messages API with the assembled context and the full tool set. A tool the current phase doesn't allow gets an error `tool_result`. At most one tool call per assistant message (`disable_parallel_tool_use`).
 2. If the response ends with `tool_use`:
    - **Server-only tool:** execute it, append the `tool_result`, and go back to step 1.
    - **Client-rendered tool:** persist the pending tool call, stream the card to the client, and stop. When the user responds, append the `tool_result` and go back to step 1.
@@ -116,10 +116,13 @@ The context for each request is built from these blocks, in this order:
 
 | Block | Contents | Cached? |
 |---|---|---|
-| System | Fixed prompt and app appendix | Yes (breakpoint 1) |
-| Project files | PDFs and images as native content blocks; Markdown and fetched URLs as text | Yes (breakpoint 2) |
-| Study state | Goal, phase, graph JSON with states and evidence counts, summaries of Known nodes | No |
-| Thread | Messages from the active thread (main thread or one node's thread) | No |
+| System | Fixed prompt and app appendix, identical on every request | Yes (breakpoint 1, 1h) |
+| Project files | One leading user message: PDFs and images as native content blocks; Markdown and fetched URLs as text | Yes (breakpoint 2, 1h) |
+| Thread | Messages from the active thread (main thread or one node's thread), append-only | Yes (breakpoint 3 on the last message, 1h) |
+
+**Study state** (goal, phase, allowed tools, graph with states and evidence counts, summaries of Known nodes) is a `<study_state>` text block appended to every user message the server sends, stored with that message, and never rewritten. The newest one is current.
+
+**Why append-only.** Opus 5.5 checks that the `system` prompt, the `tools`, and every earlier message are unchanged since each replayed thinking block was produced, and rejects edited history on new accounts. So the system prompt never carries state, `tools` is always the full set (the server rejects a tool outside the current phase with an error `tool_result`), and state rides on new messages instead of being rebuilt. Changing project files mid-study is the one prefix change left; requests set `prefix_mismatch_behavior: "drop_block"` so stale thinking is dropped instead of failing.
 
 Per-node threads keep the context small and make out-of-order navigation cheap. A node's thread never carries another node's transcript, only that node's summary.
 

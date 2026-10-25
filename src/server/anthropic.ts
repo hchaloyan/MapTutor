@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyRequest } from 'fastify'
 import { SIDE_MODEL } from './config'
 import { httpError } from './http'
+import type { StreamMessage } from './tutor'
 
 /** The user's key from `x-anthropic-key` (BYOK). Never stored, never logged. */
 export function apiKey(req: FastifyRequest): string {
@@ -29,4 +30,14 @@ export async function htmlToMarkdown(html: string, key: string): Promise<string>
     .finalMessage()
   if (message.stop_reason !== 'end_turn') throw httpError(502, `Converting the page failed (${message.stop_reason}).`)
   return message.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('')
+}
+
+export const streamMessage: StreamMessage = (params, key, onText) =>
+  clientFor(key).beta.messages.stream(params).on('text', onText).finalMessage()
+
+/** Maps an Anthropic SDK error to the HTTP error the user should see, or null for anything else. */
+export function anthropicError(err: unknown) {
+  if (err instanceof Anthropic.AuthenticationError) return httpError(401, 'Your Anthropic API key was rejected.')
+  if (err instanceof Anthropic.APIError) return httpError(502, `Anthropic API error: ${err.message}`)
+  return null
 }
