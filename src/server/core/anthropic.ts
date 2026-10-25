@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyRequest } from 'fastify'
 import { SIDE_MODEL } from './config'
 import { httpError } from './http'
-import type { StreamMessage } from './tutor'
+import type { StreamMessage } from '../tutor/loop'
 
 /** The user's key from `x-anthropic-key` (BYOK). Never stored, never logged. */
 export function apiKey(req: FastifyRequest): string {

@@ -1,8 +1,8 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, beforeEach, expect, test } from 'vitest'
-import { buildApp } from './app'
-import { openDb } from './db'
+import { buildApp } from '../app'
+import { openDb } from '../core/db'
 
 let server: Server
 let base: string

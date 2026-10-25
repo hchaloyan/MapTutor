@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { apiKey } from './anthropic'
-import { MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from './config'
-import { requireProject } from './db'
-import { httpError } from './http'
+import { apiKey } from '../core/anthropic'
+import { MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from '../core/config'
+import { requireProject } from '../core/db'
+import { httpError } from '../core/http'
 
 export type FileKind = 'pdf' | 'image' | 'text' | 'url'
 

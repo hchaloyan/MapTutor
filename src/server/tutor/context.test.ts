@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { buildRequest, fileBlocks, studyStateText, threadMessages } from './context'
-import { LOCAL_USER_ID, openDb } from './db'
+import { LOCAL_USER_ID, openDb } from '../core/db'
 import { systemPrompt } from './prompt'
 
 const HOUR = { type: 'ephemeral', ttl: '1h' }

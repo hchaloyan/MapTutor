@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
-import { buildApp } from './app'
-import { openDb } from './db'
+import { buildApp } from '../app'
+import { openDb } from '../core/db'
 
 function setup() {
   const db = openDb(':memory:')

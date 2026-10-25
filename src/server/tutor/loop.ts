@@ -76,7 +76,7 @@ export async function runTurn(opts: {
     if (message.stop_reason !== 'tool_use' || !toolUse) return emit('done', { awaiting: false })
 
     if (pause) {
-      emit('card', { toolUseId: toolUse.id, name: toolUse.name, input: tool.card(toolUse.input, ctx) })
+      emit('card', { toolUseId: toolUse.id, name: toolUse.name, input: tool.card(toolUse.input, ctx, false) })
       return emit('done', { awaiting: true })
     }
     const result = !tool

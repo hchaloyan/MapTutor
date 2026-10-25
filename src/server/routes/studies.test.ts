@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { expect, test } from 'vitest'
-import { buildApp } from './app'
-import { openDb } from './db'
-import type { StreamMessage } from './tutor'
+import { buildApp } from '../app'
+import { openDb } from '../core/db'
+import type { StreamMessage } from '../tutor/loop'
 
 type Reply = { content: unknown[]; stop_reason: string }
 const text = (t: string): Reply => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' })

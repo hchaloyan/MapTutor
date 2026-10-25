@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { LOCAL_USER_ID, requireProject } from './db'
+import { LOCAL_USER_ID, requireProject } from '../core/db'
 import { listFiles } from './files'
-import { httpError } from './http'
+import { httpError } from '../core/http'
 
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength })
 const body = (field: string, maxLength: number) => ({

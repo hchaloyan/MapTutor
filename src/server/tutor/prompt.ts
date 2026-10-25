@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-const read = (name: string) => readFileSync(new URL(`../../prompts/${name}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const read = (name: string) => readFileSync(new URL(`../../../prompts/${name}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 let cached: string | undefined
 

@@ -1,8 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
-import { TUTOR_MODEL, WEB_SEARCH_MAX_USES } from './config'
-import { mediaType } from './files'
+import { TUTOR_MODEL, WEB_SEARCH_MAX_USES } from '../core/config'
+import { mediaType } from '../routes/files'
 import { systemPrompt } from './prompt'
+import { probeStrands } from './quiz'
 
 type ContentBlock = Anthropic.Beta.BetaContentBlockParam
 type MessageParam = Anthropic.Beta.BetaUserMessageParam | Anthropic.Beta.BetaAssistantMessageParam
@@ -26,6 +27,13 @@ export function fileBlocks(db: DatabaseSync, projectId: string): ContentBlock[] 
   })
 }
 
+function strandLine(db: DatabaseSync, studyId: string, phase: string) {
+  const strands = probeStrands(db, studyId)
+  return ['probe', 'plan'].includes(phase) && strands.length
+    ? [`Strands used so far (reuse these exact names): ${strands.map(s => s.strand).join(', ')}`]
+    : []
+}
+
 export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string | null, allowedTools: string[]): string {
   const study = db.prepare('SELECT goal, phase FROM studies WHERE id = ?').get(studyId) as { goal: string; phase: string }
   return [
@@ -34,6 +42,7 @@ export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string
     `Phase: ${study.phase}`,
     `Thread: ${nodeId ? `node ${nodeId}` : 'main'}`,
     `Tools allowed now: ${allowedTools.join(', ')}`,
+    ...strandLine(db, studyId, study.phase),
     '</study_state>',
   ].join('\n')
 }

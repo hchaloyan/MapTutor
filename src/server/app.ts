@@ -1,10 +1,10 @@
 import Fastify from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, htmlToMarkdown, streamMessage } from './anthropic'
-import { fileRoutes, type HtmlToMarkdown } from './files'
-import { projectRoutes } from './projects'
-import { studyRoutes } from './studies'
-import type { StreamMessage } from './tutor'
+import { anthropicError, htmlToMarkdown, streamMessage } from './core/anthropic'
+import { fileRoutes, type HtmlToMarkdown } from './routes/files'
+import { projectRoutes } from './routes/projects'
+import { studyRoutes } from './routes/studies'
+import type { StreamMessage } from './tutor/loop'
 
 export function buildApp(opts: {
   db: DatabaseSync

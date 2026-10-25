@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs'
 import { buildApp } from './app'
-import { openDb } from './db'
+import { openDb } from './core/db'
 
 mkdirSync('data', { recursive: true })
 const db = openDb(process.env.DB_PATH ?? 'data/maptutor.db')

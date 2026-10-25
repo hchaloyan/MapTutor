@@ -1,10 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, apiKey } from './anthropic'
-import { httpError } from './http'
-import { TOOLS, type ToolCtx } from './tools'
-import { appendUserMessage, clearPending, type Emit, runTurn, type StreamMessage } from './tutor'
+import { anthropicError, apiKey } from '../core/anthropic'
+import { httpError } from '../core/http'
+import { probeStrands } from '../tutor/quiz'
+import { TOOLS, type ToolCtx } from '../tutor/tools'
+import { appendUserMessage, clearPending, type Emit, runTurn, type StreamMessage } from '../tutor/loop'
 
 type Block = Anthropic.Beta.BetaContentBlock | Anthropic.Beta.BetaContentBlockParam
 type Row = { id: string; node_id: string | null; role: 'user' | 'assistant'; content: string; pending: number; created_at: number }
@@ -46,7 +47,7 @@ function threadView(db: DatabaseSync, studyId: string, nodeId: string | null): T
       const result = results.get(b.id)
       if (tool?.kind !== 'client' || (!r.pending && (!result || result.is_error))) return []
       const answer = result && typeof result.content === 'string' ? JSON.parse(result.content) : null
-      return [{ type: 'card', toolUseId: b.id, name: b.name, input: tool.card(b.input, ctx), answer, pending: r.pending === 1, createdAt }]
+      return [{ type: 'card', toolUseId: b.id, name: b.name, input: tool.card(b.input, ctx, !!answer), answer, pending: r.pending === 1, createdAt }]
     }),
   )
 }
@@ -88,6 +89,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     ...requireStudy(db, req.params.id),
     nodes: [],
     edges: [],
+    strands: probeStrands(db, req.params.id),
   }))
 
   app.get<{ Params: { id: string }; Querystring: { nodeId?: string } }>('/api/studies/:id/thread', async req => {
@@ -144,7 +146,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       const tool = toolUse && clientTool(toolUse.name)
       if (!pending || !toolUse || tool?.kind !== 'client') throw httpError(404, "That card isn't waiting for an answer.")
       const nodeId = pending.node_id
-      const result = tool.answer(toolUse.input, req.body.answer, { db, studyId, nodeId })
+      const result = tool.answer(toolUse.input, req.body.answer, { db, studyId, nodeId }, toolUse.id)
       if ('error' in result) throw httpError(400, result.error)
       const release = lock(studyId, nodeId)
       clearPending(db, pending.id)
