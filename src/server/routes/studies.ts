@@ -3,8 +3,9 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
 import { anthropicError, apiKey } from '../core/anthropic'
 import { httpError } from '../core/http'
+import { loadGraph } from '../tutor/plan'
 import { probeStrands } from '../tutor/quiz'
-import { TOOLS, type ToolCtx } from '../tutor/tools'
+import { type Phase, TOOLS, type ToolCtx } from '../tutor/tools'
 import { appendUserMessage, clearPending, type Emit, runTurn, type StreamMessage } from '../tutor/loop'
 
 type Block = Anthropic.Beta.BetaContentBlock | Anthropic.Beta.BetaContentBlockParam
@@ -19,7 +20,7 @@ const isState = (b: Block) => b.type === 'text' && b.text.startsWith('<study_sta
 function requireStudy(db: DatabaseSync, id: string) {
   const study = db.prepare('SELECT id, project_id AS projectId, goal, phase, approach FROM studies WHERE id = ?').get(id)
   if (!study) throw httpError(404, 'Study not found.')
-  return study
+  return study as { id: string; projectId: string; goal: string; phase: Phase; approach: string | null }
 }
 
 function requireNode(db: DatabaseSync, studyId: string, nodeId: string | null) {
@@ -87,8 +88,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
 
   app.get<{ Params: { id: string } }>('/api/studies/:id', async req => ({
     ...requireStudy(db, req.params.id),
-    nodes: [],
-    edges: [],
+    ...loadGraph(db, req.params.id),
     strands: probeStrands(db, req.params.id),
   }))
 
@@ -113,9 +113,10 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     async (req, reply) => {
       const key = apiKey(req)
       const studyId = req.params.id
-      requireStudy(db, studyId)
+      const { phase } = requireStudy(db, studyId)
       const nodeId = req.body.nodeId || null
       requireNode(db, studyId, nodeId)
+      if (nodeId && (phase === 'probe' || phase === 'plan')) throw httpError(409, 'Node threads open once the plan is approved.')
       const text = req.body.text.trim()
       if (!text) throw httpError(400, "Message can't be blank.")
       const release = lock(studyId, nodeId)

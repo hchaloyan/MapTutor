@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
+import { proposeGraphTool } from './plan'
 import { quizTool } from './quiz'
 
 export type Phase = 'probe' | 'plan' | 'teach' | 'done'
@@ -12,6 +13,8 @@ export type ClientTool = {
   phases: Phase[]
   /** Error message for the tutor when the input is unusable, else null. */
   check(input: unknown, ctx: ToolCtx): string | null
+  /** Side effects of a valid call, run before the card is stored and shown. */
+  onPause?(input: unknown, ctx: ToolCtx): void
   /** What the client may see; `answered` unlocks what must stay hidden until the user answers. */
   card(input: unknown, ctx: ToolCtx, answered: boolean): unknown
   answer(input: unknown, answer: unknown, ctx: ToolCtx, toolUseId: string): { content: string } | { error: string }
@@ -81,7 +84,7 @@ const askUserQuestion: ClientTool = {
   },
 }
 
-export const TOOLS: Tool[] = [askUserQuestion, quizTool]
+export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool]
 
 /** Anthropic's server tools are always available; context.ts declares them. */
 export const allowedTools = (phase: Phase) => [...TOOLS.filter(t => t.phases.includes(phase)).map(t => t.def.name), 'web_search']

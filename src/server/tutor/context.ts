@@ -3,6 +3,8 @@ import type { DatabaseSync } from 'node:sqlite'
 import { TUTOR_MODEL, WEB_SEARCH_MAX_USES } from '../core/config'
 import { mediaType } from '../routes/files'
 import { systemPrompt } from './prompt'
+import { nextNode } from './graph'
+import { loadGraph } from './plan'
 import { probeStrands } from './quiz'
 
 type ContentBlock = Anthropic.Beta.BetaContentBlockParam
@@ -34,6 +36,19 @@ function strandLine(db: DatabaseSync, studyId: string, phase: string) {
     : []
 }
 
+function graphLines(db: DatabaseSync, studyId: string) {
+  const { nodes, edges } = loadGraph(db, studyId)
+  if (!nodes.length) return []
+  return [
+    'Graph:',
+    ...nodes.map(n => {
+      const prereqs = edges.filter(e => e.to === n.id).map(e => e.from).join(', ') || 'none'
+      return `- ${n.id} [${n.kind}] "${n.label}" — ${n.state} (${n.evidence.correct}/${n.evidence.total} correct); prerequisites: ${prereqs}`
+    }),
+    `Next node: ${nextNode(nodes, edges) ?? 'none'}`,
+  ]
+}
+
 export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string | null, allowedTools: string[]): string {
   const study = db.prepare('SELECT goal, phase FROM studies WHERE id = ?').get(studyId) as { goal: string; phase: string }
   return [
@@ -43,6 +58,7 @@ export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string
     `Thread: ${nodeId ? `node ${nodeId}` : 'main'}`,
     `Tools allowed now: ${allowedTools.join(', ')}`,
     ...strandLine(db, studyId, study.phase),
+    ...graphLines(db, studyId),
     '</study_state>',
   ].join('\n')
 }

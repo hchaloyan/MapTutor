@@ -68,6 +68,7 @@ export async function runTurn(opts: {
     const checkError = tool?.kind === 'client' && allowed ? tool.check(toolUse.input, ctx) : null
     const pause = message.stop_reason === 'tool_use' && tool?.kind === 'client' && allowed && checkError === null
 
+    if (pause) tool.onPause?.(toolUse!.input, ctx)
     insertMessage(db, studyId, nodeId, 'assistant', message.content, pause ? 1 : 0)
 
     if (message.stop_reason === 'pause_turn') continue

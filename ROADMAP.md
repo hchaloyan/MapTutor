@@ -11,7 +11,7 @@ Backend first, then frontend. Each component ends with something that runs and h
 | 2 | Graph engine | Pure TS: `propose_graph` validation, initial states, transitions, `set_node_state` guards, weak-ancestor list, next-node selection | — | Done: [plan](docs/superpowers/plans/2026-10-24-graph-engine.md) |
 | 3 | Agent loop | Context assembly with 2 cache breakpoints, tool loop with pause/resume on client tools, SSE, message persistence, tool-result route, `ask_user_question` | 0, 1 | Done: [plan](docs/superpowers/plans/2026-10-24-agent-loop.md) |
 | 4 | Probe | `quiz` tool, server-side grading, `quiz_items` with strands, Probe → Plan switch | 3 | Done: [plan](docs/superpowers/plans/2026-10-24-probe.md) |
-| 5 | Plan | Scoping web search, `propose_graph` validation, approve/feedback, initial states, approve → Teach | 2, 4 | |
+| 5 | Plan | Scoping web search, `propose_graph` validation, approve/feedback, initial states, approve → Teach | 2, 4 | Done: [plan](docs/superpowers/plans/2026-10-24-plan.md) |
 | 6 | Teach | Per-node threads, `focus_node`, quiz-check transitions, `set_node_state` guards, summaries side call, next node, prerequisite check | 5 | |
 | 7 | Usage | Token and search usage per study, search cap setting | 3 | |
 

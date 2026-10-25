@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS studies (
 );
 
 CREATE TABLE IF NOT EXISTS nodes (
-  id          TEXT PRIMARY KEY,
+  id          TEXT NOT NULL,             -- chosen by the tutor, unique within the study
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
   label       TEXT NOT NULL,
   kind        TEXT NOT NULL CHECK (kind IN ('root','derived','goal')),
@@ -48,14 +48,17 @@ CREATE TABLE IF NOT EXISTS nodes (
   state       TEXT NOT NULL CHECK (state IN ('untested','missed','frontier','known')),
   ever_known  INTEGER NOT NULL DEFAULT 0,   -- set once, never cleared
   summary     TEXT,                         -- written when first Known
-  updated_at  INTEGER NOT NULL
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (study_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS edges (
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
-  from_node   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,  -- prerequisite
-  to_node     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  PRIMARY KEY (from_node, to_node)
+  from_node   TEXT NOT NULL,             -- prerequisite
+  to_node     TEXT NOT NULL,
+  PRIMARY KEY (study_id, from_node, to_node),
+  FOREIGN KEY (study_id, from_node) REFERENCES nodes(study_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (study_id, to_node) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS quiz_items (
@@ -64,28 +67,30 @@ CREATE TABLE IF NOT EXISTS quiz_items (
   quiz_call_id      TEXT NOT NULL,          -- groups the items of one quiz tool call
   phase             TEXT NOT NULL CHECK (phase IN ('probe','check')),
   strand            TEXT,                   -- set for probe items
-  node_id           TEXT REFERENCES nodes(id) ON DELETE SET NULL,  -- set for check items
+  node_id           TEXT,                   -- set for check items
   prompt            TEXT NOT NULL,
   options           TEXT NOT NULL,          -- JSON {id, text}[]
   correct_option_id TEXT NOT NULL,
   explanation       TEXT NOT NULL,
   hint              TEXT,
   chosen_option_id  TEXT,                   -- NULL until answered
-  answered_at       INTEGER
+  answered_at       INTEGER,
+  FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS messages (
   id          TEXT PRIMARY KEY,
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
-  node_id     TEXT REFERENCES nodes(id) ON DELETE CASCADE,  -- NULL = main probe/plan thread
+  node_id     TEXT,                       -- NULL = main probe/plan thread
   role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
   content     TEXT NOT NULL,              -- JSON content blocks, as sent to and received from the API
   pending     INTEGER NOT NULL DEFAULT 0, -- 1 = assistant tool_use awaiting a user response
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(study_id, node_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_quiz_node ON quiz_items(node_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_node ON quiz_items(study_id, node_id);
 `
 
 export function openDb(path: string): DatabaseSync {
@@ -93,6 +98,18 @@ export function openDb(path: string): DatabaseSync {
   db.exec(SCHEMA)
   db.prepare('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run(LOCAL_USER_ID, Date.now())
   return db
+}
+
+export function transaction<T>(db: DatabaseSync, fn: () => T): T {
+  db.exec('BEGIN')
+  try {
+    const result = fn()
+    db.exec('COMMIT')
+    return result
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
 }
 
 export function requireProject(db: DatabaseSync, id: string) {

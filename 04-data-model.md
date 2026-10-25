@@ -45,7 +45,7 @@ CREATE TABLE studies (
 );
 
 CREATE TABLE nodes (
-  id          TEXT PRIMARY KEY,
+  id          TEXT NOT NULL,             -- chosen by the tutor, unique within the study
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
   label       TEXT NOT NULL,
   kind        TEXT NOT NULL CHECK (kind IN ('root','derived','goal')),
@@ -54,14 +54,17 @@ CREATE TABLE nodes (
   state       TEXT NOT NULL CHECK (state IN ('untested','missed','frontier','known')),
   ever_known  INTEGER NOT NULL DEFAULT 0,   -- set once, never cleared
   summary     TEXT,                         -- written when first Known
-  updated_at  INTEGER NOT NULL
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (study_id, id)
 );
 
 CREATE TABLE edges (
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
-  from_node   TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,  -- prerequisite
-  to_node     TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
-  PRIMARY KEY (from_node, to_node)
+  from_node   TEXT NOT NULL,             -- prerequisite
+  to_node     TEXT NOT NULL,
+  PRIMARY KEY (study_id, from_node, to_node),
+  FOREIGN KEY (study_id, from_node) REFERENCES nodes(study_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (study_id, to_node) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE quiz_items (
@@ -70,32 +73,35 @@ CREATE TABLE quiz_items (
   quiz_call_id      TEXT NOT NULL,          -- groups the items of one quiz tool call
   phase             TEXT NOT NULL CHECK (phase IN ('probe','check')),
   strand            TEXT,                   -- set for probe items
-  node_id           TEXT REFERENCES nodes(id) ON DELETE SET NULL,  -- set for check items
+  node_id           TEXT,                   -- set for check items
   prompt            TEXT NOT NULL,
   options           TEXT NOT NULL,          -- JSON {id, text}[]
   correct_option_id TEXT NOT NULL,
   explanation       TEXT NOT NULL,
   hint              TEXT,
   chosen_option_id  TEXT,                   -- NULL until answered
-  answered_at       INTEGER
+  answered_at       INTEGER,
+  FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE TABLE messages (
   id          TEXT PRIMARY KEY,
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
-  node_id     TEXT REFERENCES nodes(id) ON DELETE CASCADE,  -- NULL = main probe/plan thread
+  node_id     TEXT,                       -- NULL = main probe/plan thread
   role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
   content     TEXT NOT NULL,              -- JSON content blocks, as sent to and received from the API
   pending     INTEGER NOT NULL DEFAULT 0, -- 1 = assistant tool_use awaiting a user response
-  created_at  INTEGER NOT NULL
+  created_at  INTEGER NOT NULL,
+  FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_messages_thread ON messages(study_id, node_id, created_at);
-CREATE INDEX idx_quiz_node ON quiz_items(node_id);
+CREATE INDEX idx_quiz_node ON quiz_items(study_id, node_id);
 ```
 
 ## Notes
 
+- **Node IDs** are short names the tutor picks (`limits`, `r1`), so they're unique only within a study. Every reference to a node carries `study_id` as well, through composite foreign keys.
 - **Replacing the graph.** When `propose_graph` is re-proposed during Plan, the app deletes the study's nodes and edges and inserts the new set. That's safe because no node threads exist before approval.
 - **Node evidence** is derived at read time, not stored: `SELECT … FROM quiz_items WHERE node_id = ? OR strand IN (node.strands)`.
 - **API keys** are never stored server-side (see [05-stack.md](05-stack.md#byok)).

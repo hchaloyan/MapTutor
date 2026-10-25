@@ -119,6 +119,6 @@ test('every user message the server sends ends with study_state', async () => {
   t.say('help')
   await t.run()
   for (const row of t.rows().filter(r => r.role === 'user')) {
-    expect(String(row.content.at(-1)?.text)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, web_search\n<\/study_state>$/)
+    expect(String(row.content.at(-1)?.text)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, propose_graph, web_search\n<\/study_state>$/)
   }
 })
