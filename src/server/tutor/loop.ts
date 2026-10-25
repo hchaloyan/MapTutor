@@ -1,14 +1,15 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
+import { recordUsage } from '../core/usage'
 import { buildRequest, type MessageStreamParams, studyStateText } from './context'
-import { allowedTools, type Phase, TOOLS, type ToolCtx } from './tools'
+import { allowedTools, type Phase, type ServerTool, TOOLS, type ToolCtx } from './tools'
 
 export type StreamMessage = (
   params: MessageStreamParams,
   apiKey: string,
   onText: (delta: string) => void,
 ) => Promise<Anthropic.Beta.BetaMessage>
-export type Emit = (event: 'text' | 'card' | 'error' | 'done', data: object) => void
+export type Emit = (event: 'text' | 'card' | 'focus' | 'error' | 'done', data: object) => void
 
 export const MAX_STEPS = 20
 
@@ -42,7 +43,10 @@ export function clearPending(db: DatabaseSync, messageId: string) {
   db.prepare('UPDATE messages SET pending = 0 WHERE id = ?').run(messageId)
 }
 
-/** Runs the tutor from the thread's current state until it ends, pauses on a card, or fails. Model errors propagate. */
+/**
+ * Runs the tutor from the thread's current state until it ends, pauses on a card, or fails. Model errors propagate.
+ * focus_node can move the turn into another thread; a `focus` event tells the client.
+ */
 export async function runTurn(opts: {
   db: DatabaseSync
   studyId: string
@@ -51,8 +55,10 @@ export async function runTurn(opts: {
   streamMessage: StreamMessage
   emit: Emit
 }) {
-  const { db, studyId, nodeId, emit } = opts
-  const ctx: ToolCtx = { db, studyId, nodeId }
+  const { db, studyId, emit } = opts
+  let nodeId = opts.nodeId
+  let ctx: ToolCtx = { db, studyId, nodeId }
+  const { projectId } = db.prepare('SELECT project_id AS projectId FROM studies WHERE id = ?').get(studyId) as { projectId: string }
   const fail = (message: string) => {
     emit('error', { message })
     emit('done', { awaiting: false })
@@ -61,6 +67,7 @@ export async function runTurn(opts: {
   for (let step = 0; step < MAX_STEPS; step++) {
     const request = buildRequest(db, studyId, nodeId, TOOLS.map(t => t.def))
     const message = await opts.streamMessage(request, opts.apiKey, delta => emit('text', { delta }))
+    if (message.usage) recordUsage(db, projectId, studyId, message)
     const toolUse = message.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
     const tool = toolUse && TOOLS.find(t => t.def.name === toolUse.name)
     const phase = phaseOf(db, studyId)
@@ -80,7 +87,7 @@ export async function runTurn(opts: {
       emit('card', { toolUseId: toolUse.id, name: toolUse.name, input: tool.card(toolUse.input, ctx, false) })
       return emit('done', { awaiting: true })
     }
-    const result = !tool
+    const result: ReturnType<ServerTool['run']> = !tool
       ? { content: `Unknown tool \`${toolUse.name}\`.`, isError: true }
       : !allowed
         ? { content: `\`${toolUse.name}\` isn't available in the ${phase} phase.`, isError: true }
@@ -90,6 +97,12 @@ export async function runTurn(opts: {
     appendUserMessage(db, studyId, nodeId, [
       { type: 'tool_result', tool_use_id: toolUse.id, content: result.content, ...(result.isError && { is_error: true }) },
     ])
+    if (result.switchTo) {
+      nodeId = result.switchTo.nodeId
+      ctx = { db, studyId, nodeId }
+      emit('focus', { nodeId })
+      appendUserMessage(db, studyId, nodeId, [{ type: 'text', text: result.switchTo.note }])
+    }
   }
   fail('The tutor took too many steps. Send a message to continue.')
 }

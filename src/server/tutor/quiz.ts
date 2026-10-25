@@ -1,4 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { afterQuizCheck, type NodeState } from './graph'
+import { setNodeState } from './teach'
 import type { ClientTool, Phase, ToolCtx } from './tools'
 
 type Option = { id: string; text: string }
@@ -125,9 +127,20 @@ export const quizTool: ClientTool = {
         it.prompt, JSON.stringify(it.options), it.correctOptionId, it.explanation, it.hint ?? null, choices[it.id] as string, now,
       )
     }
+    if (check) applyChecks(ctx, items, choices)
     const results = items.map(it => ({ itemId: it.id, chosenOptionId: choices[it.id], correct: choices[it.id] === it.correctOptionId }))
     return { content: JSON.stringify({ results }) }
   },
+}
+
+/** A node passes a quiz-check only if every item on it in this call is correct. */
+function applyChecks({ db, studyId }: ToolCtx, items: Item[], choices: Record<string, unknown>) {
+  const passed = new Map<string, boolean>()
+  for (const it of items) passed.set(it.nodeId!, (passed.get(it.nodeId!) ?? true) && choices[it.id] === it.correctOptionId)
+  for (const [nodeId, ok] of passed) {
+    const node = db.prepare('SELECT state, ever_known FROM nodes WHERE study_id = ? AND id = ?').get(studyId, nodeId) as { state: NodeState; ever_known: number }
+    setNodeState(db, studyId, nodeId, afterQuizCheck(node.state, node.ever_known === 1, ok))
+  }
 }
 
 /** Probe strands with their scores, in order of first use. Names are exact (case-sensitive). */

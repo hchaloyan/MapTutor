@@ -146,3 +146,19 @@ test('rejects a page whose declared size is over the project limit', async () =>
   expect(res.statusCode).toBe(413)
   expect(res.json().message).toBe("A project's files are limited to 20 MB in total.")
 })
+
+test('URL imports record side-call usage on the project, not on any study', async () => {
+  const app = buildApp({
+    db: openDb(':memory:'),
+    htmlToMarkdown: async (_html, _key, onUsage) => {
+      onUsage?.({ model: 'claude-haiku-5-5', usage: { input_tokens: 40, output_tokens: 9 } as never })
+      return '# Converted'
+    },
+  })
+  const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
+  const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
+  await app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, headers: { 'x-anthropic-key': 'sk-test' }, payload: { url: `${base}/page` } })
+  const after = (await app.inject(`/api/projects/${project.id}`)).json()
+  expect(after.usage).toEqual([{ model: 'claude-haiku-5-5', inputTokens: 40, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0, webSearches: 0 }])
+  expect(after.studies.find((s: { id: string }) => s.id === study.id).usage).toEqual([])
+})

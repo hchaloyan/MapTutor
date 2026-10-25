@@ -1,9 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
-import { TUTOR_MODEL, WEB_SEARCH_MAX_USES } from '../core/config'
+import { TUTOR_MODEL } from '../core/config'
 import { mediaType } from '../routes/files'
 import { systemPrompt } from './prompt'
-import { nextNode } from './graph'
+import { nextNode, weakAncestors } from './graph'
 import { loadGraph } from './plan'
 import { probeStrands } from './quiz'
 
@@ -36,8 +36,9 @@ function strandLine(db: DatabaseSync, studyId: string, phase: string) {
     : []
 }
 
-function graphLines(db: DatabaseSync, studyId: string) {
-  const { nodes, edges } = loadGraph(db, studyId)
+type Graph = ReturnType<typeof loadGraph>
+
+function graphLines({ nodes, edges }: Graph) {
   if (!nodes.length) return []
   return [
     'Graph:',
@@ -49,8 +50,25 @@ function graphLines(db: DatabaseSync, studyId: string) {
   ]
 }
 
+/** Node threads never see the main thread, so their state carries the approach and the node's weak prerequisites. */
+function teachLines(study: { phase: string; approach: string | null }, { nodes, edges }: Graph, nodeId: string | null) {
+  if (study.phase !== 'teach' && study.phase !== 'done') return []
+  const summaries = nodes.filter(n => n.summary).map(n => `- ${n.id}: ${n.summary}`)
+  const node = nodes.find(n => n.id === nodeId)
+  const weak = node && (weakAncestors(node.id, nodes, edges).map(w => `${w.id} (${w.state})`).join(', ') || 'none')
+  return [
+    ...(summaries.length ? ['Summaries of known nodes:', ...summaries] : []),
+    ...(node ? [`This node: ${node.description}`, `Weak prerequisites: ${weak}`, `Approach: ${study.approach}`] : []),
+  ]
+}
+
+/** Text the app writes into user messages (state blocks, notes); the user never sees it. */
+export const isAppText = (b: { type: string; text?: string }) =>
+  b.type === 'text' && !!b.text && (b.text.startsWith('<study_state>') || b.text.startsWith('[App:'))
+
 export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string | null, allowedTools: string[]): string {
-  const study = db.prepare('SELECT goal, phase FROM studies WHERE id = ?').get(studyId) as { goal: string; phase: string }
+  const study = db.prepare('SELECT goal, phase, approach FROM studies WHERE id = ?').get(studyId) as { goal: string; phase: string; approach: string | null }
+  const graph = loadGraph(db, studyId)
   return [
     '<study_state>',
     `Goal: ${study.goal}`,
@@ -58,7 +76,8 @@ export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string
     `Thread: ${nodeId ? `node ${nodeId}` : 'main'}`,
     `Tools allowed now: ${allowedTools.join(', ')}`,
     ...strandLine(db, studyId, study.phase),
-    ...graphLines(db, studyId),
+    ...graphLines(graph),
+    ...teachLines(study, graph, nodeId),
     '</study_state>',
   ].join('\n')
 }
@@ -83,7 +102,10 @@ export function buildRequest(
   nodeId: string | null,
   tools: Anthropic.Beta.BetaToolUnion[],
 ): MessageStreamParams {
-  const { projectId } = db.prepare('SELECT project_id AS projectId FROM studies WHERE id = ?').get(studyId) as { projectId: string }
+  const { projectId, searchCap } = db.prepare('SELECT project_id AS projectId, search_cap AS searchCap FROM studies WHERE id = ?').get(studyId) as {
+    projectId: string
+    searchCap: number
+  }
   const files = fileBlocks(db, projectId)
   const thread = threadMessages(db, studyId, nodeId)
   const messages: MessageParam[] = [...(files.length ? [withBreakpoint({ role: 'user', content: files })] : []), ...thread]
@@ -96,7 +118,7 @@ export function buildRequest(
     thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
     output_config: { effort: 'high' },
     system: [{ type: 'text', text: systemPrompt(), cache_control: CACHE }],
-    tools: [...tools, { type: 'web_search_20260209', name: 'web_search', max_uses: WEB_SEARCH_MAX_USES }],
+    tools: [...tools, { type: 'web_search_20260209', name: 'web_search', max_uses: searchCap }],
     tool_choice: { type: 'auto', disable_parallel_tool_use: true },
     messages,
   }

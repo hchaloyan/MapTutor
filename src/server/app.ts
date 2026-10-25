@@ -1,16 +1,18 @@
 import Fastify from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, htmlToMarkdown, streamMessage } from './core/anthropic'
+import { anthropicError, htmlToMarkdown, streamMessage, summarize } from './core/anthropic'
 import { fileRoutes, type HtmlToMarkdown } from './routes/files'
 import { projectRoutes } from './routes/projects'
 import { studyRoutes } from './routes/studies'
 import type { StreamMessage } from './tutor/loop'
+import type { Summarize } from './tutor/teach'
 
 export function buildApp(opts: {
   db: DatabaseSync
   logStream?: { write(line: string): void }
   htmlToMarkdown?: HtmlToMarkdown
   streamMessage?: StreamMessage
+  summarize?: Summarize
 }) {
   const { db, logStream } = opts
   const app = Fastify({
@@ -26,7 +28,7 @@ export function buildApp(opts: {
 
   projectRoutes(app, db)
   fileRoutes(app, { db, htmlToMarkdown: opts.htmlToMarkdown ?? htmlToMarkdown })
-  studyRoutes(app, { db, streamMessage: opts.streamMessage ?? streamMessage })
+  studyRoutes(app, { db, streamMessage: opts.streamMessage ?? streamMessage, summarize: opts.summarize ?? summarize })
 
   return app
 }

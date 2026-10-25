@@ -4,6 +4,7 @@ import { apiKey } from '../core/anthropic'
 import { MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from '../core/config'
 import { requireProject } from '../core/db'
 import { httpError } from '../core/http'
+import { type OnUsage, recordUsage } from '../core/usage'
 
 export type FileKind = 'pdf' | 'image' | 'text' | 'url'
 
@@ -53,13 +54,13 @@ export function decodeText(bytes: Uint8Array) {
   }
 }
 
-export type HtmlToMarkdown = (html: string, apiKey: string) => Promise<string>
+export type HtmlToMarkdown = (html: string, apiKey: string, onUsage?: OnUsage) => Promise<string>
 
 // ponytail: regex strip, not a parser; it only trims tokens before the converter sees the page
 const stripHtml = (html: string) =>
   html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style|noscript|svg)\b[\s\S]*?<\/\1>/gi, '')
 
-async function fetchUrl(raw: string, key: string, htmlToMarkdown: HtmlToMarkdown) {
+async function fetchUrl(raw: string, key: string, htmlToMarkdown: HtmlToMarkdown, onUsage: OnUsage) {
   let url: URL
   try {
     url = new URL(raw)
@@ -94,7 +95,7 @@ async function fetchUrl(raw: string, key: string, htmlToMarkdown: HtmlToMarkdown
   }
   if (type === 'application/pdf') return { kind: 'pdf' as const, data: bytes, text: null }
   if (type === 'text/plain' || type === 'text/markdown') return { kind: 'url' as const, data: null, text: bytes.toString('utf8') }
-  return { kind: 'url' as const, data: null, text: await htmlToMarkdown(stripHtml(bytes.toString('utf8')), key) }
+  return { kind: 'url' as const, data: null, text: await htmlToMarkdown(stripHtml(bytes.toString('utf8')), key, onUsage) }
 }
 
 const importedSize = (file: { data: Buffer | null; text: string | null }) =>
@@ -134,7 +135,7 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
       const key = apiKey(req)
       requireProject(db, req.params.id)
       const url = req.body.url.trim()
-      const imported = await fetchUrl(url, key, htmlToMarkdown)
+      const imported = await fetchUrl(url, key, htmlToMarkdown, billed => recordUsage(db, req.params.id, null, billed))
       checkRoom(db, req.params.id, importedSize(imported))
       const id = crypto.randomUUID()
       db.prepare('INSERT INTO files (id, project_id, kind, name, url, data, text_cache, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
@@ -148,7 +149,7 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
     const key = apiKey(req)
     const file = requireFile(db, req.params.id)
     if (!file.url) throw httpError(400, 'Only imported URLs can be refreshed.')
-    const imported = await fetchUrl(file.url, key, htmlToMarkdown)
+    const imported = await fetchUrl(file.url, key, htmlToMarkdown, billed => recordUsage(db, file.projectId, null, billed))
     checkRoom(db, file.projectId, importedSize(imported), file.id)
     db.prepare('UPDATE files SET kind = ?, data = ?, text_cache = ? WHERE id = ?').run(imported.kind, imported.data, imported.text, file.id)
     return fileInfo(db, file.id)

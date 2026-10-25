@@ -41,6 +41,8 @@ CREATE TABLE studies (
   goal        TEXT NOT NULL,             -- refined during probe
   phase       TEXT NOT NULL CHECK (phase IN ('probe','plan','teach','done')),
   approach    TEXT,                      -- prose plan from the approved propose_graph
+  focus_node_id TEXT,                    -- the node being taught; set by focus_node or by opening its thread
+  search_cap  INTEGER NOT NULL DEFAULT 3, -- web_search max_uses; fixed at creation because tools can't change mid-study
   created_at  INTEGER NOT NULL
 );
 
@@ -93,6 +95,20 @@ CREATE TABLE messages (
   pending     INTEGER NOT NULL DEFAULT 0, -- 1 = assistant tool_use awaiting a user response
   created_at  INTEGER NOT NULL,
   FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
+);
+
+-- One row per model call, including side calls. study_id is NULL for project-level calls (URL import).
+CREATE TABLE usage (
+  id                 INTEGER PRIMARY KEY,
+  project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  study_id           TEXT REFERENCES studies(id) ON DELETE CASCADE,
+  model              TEXT NOT NULL,             -- the model that served the call
+  input_tokens       INTEGER NOT NULL,
+  output_tokens      INTEGER NOT NULL,
+  cache_read_tokens  INTEGER NOT NULL,
+  cache_write_tokens INTEGER NOT NULL,
+  web_searches       INTEGER NOT NULL,
+  created_at         INTEGER NOT NULL
 );
 
 CREATE INDEX idx_messages_thread ON messages(study_id, node_id, created_at);

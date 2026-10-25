@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
 import { proposeGraphTool } from './plan'
 import { quizTool } from './quiz'
+import { focusNodeTool, setNodeStateTool } from './teach'
 
 export type Phase = 'probe' | 'plan' | 'teach' | 'done'
 export type ToolCtx = { db: DatabaseSync; studyId: string; nodeId: string | null }
@@ -25,7 +26,8 @@ export type ServerTool = {
   kind: 'server'
   def: Anthropic.Beta.BetaTool
   phases: Phase[]
-  run(input: unknown, ctx: ToolCtx): { content: string; isError?: boolean }
+  /** `switchTo` moves the rest of the turn into that node's thread, opened with `note`. */
+  run(input: unknown, ctx: ToolCtx): { content: string; isError?: boolean; switchTo?: { nodeId: string; note: string } }
 }
 
 export type Tool = ClientTool | ServerTool
@@ -84,7 +86,7 @@ const askUserQuestion: ClientTool = {
   },
 }
 
-export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool]
+export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool, focusNodeTool, setNodeStateTool]
 
 /** Anthropic's server tools are always available; context.ts declares them. */
 export const allowedTools = (phase: Phase) => [...TOOLS.filter(t => t.phases.includes(phase)).map(t => t.def.name), 'web_search']

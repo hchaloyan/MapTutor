@@ -3,7 +3,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
 import { anthropicError, apiKey } from '../core/anthropic'
 import { httpError } from '../core/http'
+import { usageByModel } from '../core/usage'
+import { isAppText } from '../tutor/context'
+import { weakAncestors } from '../tutor/graph'
 import { loadGraph } from '../tutor/plan'
+import { type Summarize, summarizeNew } from '../tutor/teach'
 import { probeStrands } from '../tutor/quiz'
 import { type Phase, TOOLS, type ToolCtx } from '../tutor/tools'
 import { appendUserMessage, clearPending, type Emit, runTurn, type StreamMessage } from '../tutor/loop'
@@ -15,12 +19,11 @@ export type ThreadItem =
   | { type: 'user' | 'assistant'; text: string; createdAt: number }
   | { type: 'card'; toolUseId: string; name: string; input: unknown; answer: unknown; pending: boolean; createdAt: number }
 
-const isState = (b: Block) => b.type === 'text' && b.text.startsWith('<study_state>')
 
 function requireStudy(db: DatabaseSync, id: string) {
-  const study = db.prepare('SELECT id, project_id AS projectId, goal, phase, approach FROM studies WHERE id = ?').get(id)
+  const study = db.prepare('SELECT id, project_id AS projectId, goal, phase, approach, focus_node_id AS focusNodeId, search_cap AS searchCap FROM studies WHERE id = ?').get(id)
   if (!study) throw httpError(404, 'Study not found.')
-  return study as { id: string; projectId: string; goal: string; phase: Phase; approach: string | null }
+  return study as { id: string; projectId: string; goal: string; phase: Phase; approach: string | null; focusNodeId: string | null; searchCap: number }
 }
 
 function requireNode(db: DatabaseSync, studyId: string, nodeId: string | null) {
@@ -42,7 +45,7 @@ function threadView(db: DatabaseSync, studyId: string, nodeId: string | null): T
   return parsed.flatMap(r =>
     r.blocks.flatMap((b): ThreadItem[] => {
       const createdAt = r.created_at
-      if (b.type === 'text' && !isState(b)) return [{ type: r.role, text: b.text, createdAt }]
+      if (b.type === 'text' && !isAppText(b)) return [{ type: r.role, text: b.text, createdAt }]
       if (b.type !== 'tool_use') return []
       const tool = clientTool(b.name)
       const result = results.get(b.id)
@@ -53,20 +56,20 @@ function threadView(db: DatabaseSync, studyId: string, nodeId: string | null): T
   )
 }
 
-export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; streamMessage: StreamMessage }) {
-  const { db, streamMessage } = opts
-  // ponytail: in-memory per-thread lock; holds only while one server process owns the database
+export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; streamMessage: StreamMessage; summarize: Summarize }) {
+  const { db, streamMessage, summarize } = opts
+  // One turn per study, since focus_node can move a turn into another thread.
+  // ponytail: in-memory lock; holds only while one server process owns the database
   const running = new Set<string>()
-  const threadKey = (studyId: string, nodeId: string | null) => `${studyId}:${nodeId ?? ''}`
 
-  function lock(studyId: string, nodeId: string | null) {
-    const key = threadKey(studyId, nodeId)
-    if (running.has(key)) throw httpError(409, 'The tutor is still replying.')
-    running.add(key)
-    return () => running.delete(key)
+  function lock(studyId: string) {
+    if (running.has(studyId)) throw httpError(409, 'The tutor is still replying.')
+    running.add(studyId)
+    return () => running.delete(studyId)
   }
 
-  async function stream(reply: FastifyReply, release: () => void, run: (emit: Emit) => Promise<void>) {
+  /** Streams one turn. Summaries come after `done` and the lock's release, so they never hold up the user. */
+  async function streamTurn(reply: FastifyReply, release: () => void, studyId: string, nodeId: string | null, key: string) {
     reply.hijack()
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     // A closed tab doesn't stop the turn: state stays consistent and the thread shows the reply on reload.
@@ -74,7 +77,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       if (!reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
     try {
-      await run(emit)
+      await runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit })
     } catch (err) {
       const mapped = anthropicError(err)
       if (!mapped) app.log.error(err)
@@ -82,6 +85,8 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       emit('done', { awaiting: false })
     } finally {
       release()
+      // A failed summary is retried after the next turn.
+      await summarizeNew(db, studyId, key, summarize).catch(err => app.log.error(err))
       reply.raw.end()
     }
   }
@@ -90,7 +95,16 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     ...requireStudy(db, req.params.id),
     ...loadGraph(db, req.params.id),
     strands: probeStrands(db, req.params.id),
+    usage: usageByModel(db, 'study_id', req.params.id),
   }))
+
+  /** Ancestors that aren't known, most foundational first; the banner's "Go to" target is weak[0]. */
+  app.get<{ Params: { id: string; nodeId: string } }>('/api/studies/:id/nodes/:nodeId/prerequisites', async req => {
+    requireStudy(db, req.params.id)
+    requireNode(db, req.params.id, req.params.nodeId)
+    const { nodes, edges } = loadGraph(db, req.params.id)
+    return { weak: weakAncestors(req.params.nodeId, nodes, edges) }
+  })
 
   app.get<{ Params: { id: string }; Querystring: { nodeId?: string } }>('/api/studies/:id/thread', async req => {
     requireStudy(db, req.params.id)
@@ -119,13 +133,14 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       if (nodeId && (phase === 'probe' || phase === 'plan')) throw httpError(409, 'Node threads open once the plan is approved.')
       const text = req.body.text.trim()
       if (!text) throw httpError(400, "Message can't be blank.")
-      const release = lock(studyId, nodeId)
+      const release = lock(studyId)
       if (db.prepare('SELECT 1 FROM messages WHERE study_id = ? AND node_id IS ? AND pending = 1').get(studyId, nodeId)) {
         release()
         throw httpError(409, 'Answer the card first.')
       }
+      if (nodeId) db.prepare('UPDATE studies SET focus_node_id = ? WHERE id = ?').run(nodeId, studyId)
       appendUserMessage(db, studyId, nodeId, [{ type: 'text', text }])
-      return stream(reply, release, emit => runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit }))
+      return streamTurn(reply, release, studyId, nodeId, key)
     },
   )
 
@@ -149,10 +164,10 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       const nodeId = pending.node_id
       const result = tool.answer(toolUse.input, req.body.answer, { db, studyId, nodeId }, toolUse.id)
       if ('error' in result) throw httpError(400, result.error)
-      const release = lock(studyId, nodeId)
+      const release = lock(studyId)
       clearPending(db, pending.id)
       appendUserMessage(db, studyId, nodeId, [{ type: 'tool_result', tool_use_id: toolUse.id, content: result.content }])
-      return stream(reply, release, emit => runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit }))
+      return streamTurn(reply, release, studyId, nodeId, key)
     },
   )
 }
