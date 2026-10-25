@@ -57,12 +57,15 @@ test('the fake tutor walks a goal from question to done', async () => {
     functions: 'known', limits: 'known', slope: 'frontier', derivative: 'missed', chain: 'untested',
   })
 
-  // Approve, then pass each quiz-check until the goal is known.
+  // Approve, then pass each quiz-check and answer the check-in until the goal is known.
   let list = await t.post('tool-results', { toolUseId: c.toolUseId, answer: { decision: 'approved' } })
   for (let i = 0; i < 10 && t.card(list); i++) {
     const quiz = t.card(list)!
     expect(quiz.name).toBe('quiz')
     list = await t.post('tool-results', { toolUseId: quiz.toolUseId, answer: { choices: Object.fromEntries(quiz.input.items.map((it: { id: string }) => [it.id, 'b'])) } })
+    expect(t.card(list)).toBeUndefined()
+    if ((await t.getStudy()).phase === 'done') break
+    list = await t.post('messages', { text: 'Makes sense.', nodeId: t.seen.findLast(e => e.event === 'focus')!.data.nodeId })
   }
 
   const done = await t.getStudy()
@@ -74,13 +77,16 @@ test('the fake tutor walks a goal from question to done', async () => {
   expect(list.filter(e => e.event === 'text').map(e => e.data.delta).join('')).toBe("That's the goal. Nicely done.")
 })
 
-test('a wrong quiz-check answer gets the same question again', async () => {
+test('a wrong quiz-check answer gets a check-in, then the same question again', async () => {
   const t = await setup()
   let c = t.card(await t.post('messages', { text: 'hi' }))!
   c = t.card(await t.post('tool-results', { toolUseId: c.toolUseId, answer: { answers: ['Pass the midterm next week'] } }))!
   c = t.card(await t.post('tool-results', { toolUseId: c.toolUseId, answer: { choices: Object.fromEntries(c.input.items.map((it: { id: string }, i: number) => [it.id, i === 2 ? 'a' : 'b'])) } }))!
   c = t.card(await t.post('tool-results', { toolUseId: c.toolUseId, answer: { decision: 'approved' } }))!
-  const wrong = t.card(await t.post('tool-results', { toolUseId: c.toolUseId, answer: { choices: { [c.input.items[0].id]: 'a' } } }))!
+  const checkIn = await t.post('tool-results', { toolUseId: c.toolUseId, answer: { choices: { [c.input.items[0].id]: 'a' } } })
+  expect(t.card(checkIn)).toBeUndefined()
+  expect(checkIn.filter(e => e.event === 'text').map(e => e.data.delta).join('')).toBe('Not quite. What felt missing, or where did you get stuck?')
+  const wrong = t.card(await t.post('messages', { text: 'I mixed up the steps.', nodeId: 'slope' }))!
   expect(wrong.name).toBe('quiz')
   expect(wrong.input.items[0].prompt).toBe(c.input.items[0].prompt)
 })

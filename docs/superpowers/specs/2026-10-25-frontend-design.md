@@ -73,6 +73,10 @@ Follows the OS by default; a ☾/☀ toggle in the top bar overrides it and is r
 
 Light-mode node labels stay charcoal (`ink`), no edge. Dark values for `accent-tint`, `danger`, `error-text` and `ok-text` are **(my call)**: pick lighter variants that pass contrast on `#1A1C21`/`#262930` (e.g. error `#FF6B70`, tint `rgba(76,141,255,.16)`).
 
+### Icons
+
+Every icon comes from Lucide (`lucide-react`); no hand-drawn or text-glyph icons, and arrows are icons, not text (user, 2026-10-25).
+
 ### Buttons
 
 - **Primary:** accent pill, white 800-weight text.
@@ -104,9 +108,9 @@ Top bar: **MapTutor** wordmark left; **Usage** (project totals), theme toggle ri
   - `GOALS` header, then a surface list. Each row: goal text (800), phase label (Probe / Plan / Teach in muted; **Done ✓** in `ok-text`), and a 150px mini mastery bar (segments in state colors, 2px gaps, rounded; an empty gray track before the graph exists). Hovering a row shows **✕** at its end → dialog. Clicking a row opens the goal.
 - **Right column:** `FILES` header (level with `ADD A NEW GOAL`), then a surface list:
   - Rows: a colored kind badge (PDF red, MD/TXT purple, IMG teal, URL blue), name (ellipsis), size; link rows also get **Refresh** (accent text). **✕** deletes → dialog.
-  - Last row: "Drop files here or **browse** · **add link**" with "5.4 of 20 MB used" under it. The whole box accepts dropped files.
+  - Last row: "Drop files here or **browse** · **add link**" with "5.4 of 100 MB used" under it. The whole box accepts dropped files.
   - **add link** opens a URL field in the box with **Add** (primary) and **Cancel**.
-- **Empty states:** no goals: "No goals yet. Add one above." No files: "Drop slides, notes or images here, or **browse** · **add link**" and "PDF, images, .md, .txt, links · up to 20 MB per project".
+- **Empty states:** no goals: "No goals yet. Add one above." No files: "Drop slides, notes or images here, or **browse** · **add link**" and "PDF, images, .md, .txt, links · up to 100 MB per project".
 
 **First run (no projects):** the page area centers "No projects yet" / "A project is a subject and its materials: slides, notes, links. Each one holds as many goals as you like." and a **+ New project** button that opens the sidebar's name field.
 
@@ -126,7 +130,7 @@ The projects sidebar is hidden; the goal screen is full width.
 
 - dagre, **top to bottom**: roots at the top, goal at the bottom. Nodes in a rank sit in tidy rows, evenly spaced.
 - Re-layout only when the graph is (re)proposed; state changes recolor in place.
-- Opens fitted to the pane. Scroll or pinch to zoom, drag to pan, and **+ / − / fit** buttons stacked bottom right (surface, soft shadow).
+- Opens fitted to the pane. Scroll or pinch to zoom, drag to pan, and **+ / −** buttons stacked bottom right (surface, soft shadow). No fit button (user, 2026-10-25).
 
 ### Nodes
 

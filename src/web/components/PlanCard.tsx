@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { useState } from 'react'
 import type { Card } from '../lib/api'
 import { Markdown } from './Markdown'
@@ -14,7 +15,9 @@ export function PlanCard({ card, onAnswer, disabled }: { card: Card; onAnswer(an
       <Markdown text={card.input.approach} />
       {!card.pending ? (
         answer?.decision === 'approved' ? (
-          <div className="plan-outcome approved">✓ Approved</div>
+          <div className="plan-outcome approved">
+            <Check size={16} strokeWidth={3} /> Approved
+          </div>
         ) : (
           answer && <div className="plan-outcome">You asked for changes: {answer.text}</div>
         )

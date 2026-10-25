@@ -1,3 +1,4 @@
+import { Check, X } from 'lucide-react'
 import { useState } from 'react'
 import { api, type StudySummary } from '../lib/api'
 import { goalName, phaseLabel } from '../lib/format'
@@ -61,7 +62,10 @@ export function GoalList({ studies, onChange }: { studies: StudySummary[]; onCha
           return (
             <div key={s.id} className="row goal-row" role="link" tabIndex={0} onClick={() => navigate(`/goals/${s.id}`)} onKeyDown={e => e.key === 'Enter' && navigate(`/goals/${s.id}`)}>
               <span className="goal-name ellipsis">{goalName(s)}</span>
-              <span className={`goal-phase${phase.done ? ' done' : ''}`}>{phase.text}</span>
+              <span className={`goal-phase${phase.done ? ' done' : ''}`}>
+                {phase.text}
+                {phase.done && <Check size={13} strokeWidth={3} />}
+              </span>
               <MasteryBar counts={s.counts} width={150} />
               <button
                 className="row-x"
@@ -71,7 +75,7 @@ export function GoalList({ studies, onChange }: { studies: StudySummary[]; onCha
                   setDeleting(s)
                 }}
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
           )

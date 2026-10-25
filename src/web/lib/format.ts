@@ -5,7 +5,7 @@ export const countLabel = (n: number, noun: 'goal' | 'file') => (n === 0 ? `no $
 /** The tutor's short title once it has set one; until then, what the user typed. */
 export const goalName = (s: { title: string | null; goal: string }) => s.title ?? s.goal
 
-const PHASES: Record<Phase, string> = { probe: 'Probe', plan: 'Plan', teach: 'Teach', done: 'Done ✓' }
+const PHASES: Record<Phase, string> = { probe: 'Probe', plan: 'Plan', teach: 'Teach', done: 'Done' }
 export const phaseLabel = (phase: Phase) => ({ text: PHASES[phase], done: phase === 'done' })
 
 export const STATES: NodeState[] = ['known', 'frontier', 'missed', 'untested']
@@ -19,7 +19,7 @@ const mb = (n: number) => Number((n / MB).toFixed(1))
 export const formatBytes = (n: number) => (n >= MB ? `${mb(n)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`)
 
 // The server's project limit (MAX_PROJECT_BYTES).
-export const usedLabel = (bytes: number) => `${mb(bytes)} of 20 MB used`
+export const usedLabel = (bytes: number) => `${mb(bytes)} of 100 MB used`
 
 const BADGES = { pdf: ['PDF', 'pdf'], image: ['IMG', 'image'], url: ['URL', 'url'] } as const
 

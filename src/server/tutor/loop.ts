@@ -1,11 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
 import { recordUsage } from '../core/usage'
-import { fileBlocks, studyStateText } from './context'
+import { canRead, fileBlocks, isAppText, studyStateText } from './context'
 import type { Block, Decision, RunHop, ToolOutcome } from './engine'
 import { allowedTools, type ClientTool, type Phase, TOOLS, type ToolCtx } from './tools'
 
-export type Emit = (event: 'text' | 'status' | 'card' | 'focus' | 'error' | 'done', data: object) => void
+export type Emit = (event: 'answered' | 'text' | 'status' | 'card' | 'focus' | 'error' | 'done', data: object) => void
 
 export const MAX_STEPS = 20 // hops per turn
 
@@ -72,6 +72,26 @@ function setThreadSession(db: DatabaseSync, studyId: string, nodeId: string | nu
 
 const isClient = (name: string | undefined) => TOOLS.some(t => t.kind === 'client' && t.def.name === name)
 
+const CHECK_IN =
+  "The user hasn't replied since the quiz-check. They already see the results with the correct answers and explanations. Check in with them in chat first, warmly: ask what felt missing, or where they got stuck and why. If every answer was right, ask lightly whether anything still feels shaky. Then end your turn and wait for their reply."
+
+/** True from a quiz-check's answer until the user next writes in this thread: the tutor talks before it calls a tool. */
+function awaitingReply(db: DatabaseSync, studyId: string, nodeId: string | null) {
+  const rows = db
+    .prepare("SELECT content FROM messages WHERE study_id = ? AND node_id IS ? AND role = 'user' ORDER BY created_at DESC, rowid DESC")
+    .all(studyId, nodeId) as { content: string }[]
+  for (const row of rows) {
+    const blocks = JSON.parse(row.content) as Block[]
+    if (blocks.some(b => b.type === 'text' && !isAppText(b))) return false
+    for (const b of blocks) {
+      // Refused calls' results sit in between; only a quiz's result decides.
+      const quiz = b.type === 'tool_result' && (db.prepare('SELECT phase FROM quiz_items WHERE quiz_call_id = ? LIMIT 1').get(b.tool_use_id) as { phase: string } | undefined)
+      if (quiz) return quiz.phase === 'check'
+    }
+  }
+  return false
+}
+
 /** Retry resumes a card answer that is the thread's last row; anything else asks the tutor to reply again. */
 export function retryPrompt(db: DatabaseSync, studyId: string, nodeId: string | null): Block[] | null {
   const last = db
@@ -118,6 +138,9 @@ export async function runTurn(opts: {
     let switchTo: { nodeId: string; note: string } | undefined
 
     const decide = (name: string, input: unknown, toolUseId: string): Decision => {
+      if (name === 'Read') {
+        return canRead(projectId, input) ? { kind: 'run' } : { kind: 'deny', reason: 'Read opens only the project files listed at the start of this conversation.' }
+      }
       const tool = TOOLS.find(t => t.def.name === name)
       if (!tool) return { kind: 'deny', reason: `Unknown tool \`${name}\`.` }
       // A card that was already shown is settled first: its answer may have changed the phase (approval → teach).
@@ -126,6 +149,7 @@ export async function runTurn(opts: {
         if (stored) return { kind: 'answer', outcome: { content: [resultText(stored.block), stateText(db, studyId, thread)] } }
         if (findBlock(db, studyId, thread, 'tool_use', toolUseId)?.pending) return { kind: 'defer' }
       }
+      if (awaitingReply(db, studyId, thread)) return { kind: 'deny', reason: CHECK_IN }
       const phase = phaseOf(db, studyId)
       if (!tool.phases.includes(phase)) return { kind: 'deny', reason: `\`${name}\` isn't available in the ${phase} phase.` }
       if (tool.kind === 'server') return { kind: 'run' }

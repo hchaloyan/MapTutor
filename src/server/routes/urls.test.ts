@@ -17,7 +17,7 @@ beforeAll(async () => {
     if (req.url === '/page') return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(pageHtml)
     // Bodies that never finish: the server must decide from the headers alone.
     if (req.url === '/video') return res.writeHead(200, { 'content-type': 'video/mp4' }).write('x')
-    if (req.url === '/huge.pdf') return res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': String(21 * 1024 * 1024) }).write('x')
+    if (req.url === '/huge.pdf') return res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': String(101 * 1024 * 1024) }).write('x')
     const page = pages[req.url ?? '']
     if (!page) return res.writeHead(404).end('nope')
     res.writeHead(200, { 'content-type': page[0] }).end(page[1])
@@ -128,7 +128,7 @@ test('rejects a page whose declared size is over the project limit', async () =>
   const { importUrl } = await setup()
   const res = await importUrl(`${base}/huge.pdf`)
   expect(res.statusCode).toBe(413)
-  expect(res.json().message).toBe("A project's files are limited to 20 MB in total.")
+  expect(res.json().message).toBe("A project's files are limited to 100 MB in total.")
 })
 
 test('URL imports record side-call usage on the project, not on any study', async () => {

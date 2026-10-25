@@ -11,6 +11,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from '@xyflow/react'
+import { Minus, Plus } from 'lucide-react'
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { Study, StudyNode } from '../lib/api'
 import { STATES } from '../lib/format'
@@ -167,13 +168,10 @@ function Zoom() {
   return (
     <div className="zoom surface">
       <button aria-label="Zoom in" onClick={() => flow.zoomIn({ duration: 200 })}>
-        +
+        <Plus size={16} />
       </button>
       <button aria-label="Zoom out" onClick={() => flow.zoomOut({ duration: 200 })}>
-        −
-      </button>
-      <button aria-label="Fit the map" onClick={() => flow.fitView({ padding: 0.12, duration: 300 })}>
-        ⤢
+        <Minus size={16} />
       </button>
     </div>
   )

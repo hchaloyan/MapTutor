@@ -29,7 +29,7 @@ The backend:
 
 ## Claude sign-in
 
-- **Token.** `claude setup-token` prints a long-lived token for the user's subscription. It's set as `CLAUDE_CODE_OAUTH_TOKEN` in the server's environment and never written to the repo, the database or the browser. `npm run dev:server` exits with instructions when it's missing.
+- **Token.** `claude setup-token` prints a long-lived token for the user's subscription. It's set as `CLAUDE_CODE_OAUTH_TOKEN` in the server's environment and never written to the repo, the database or the browser. `npm run dev:server` exits with instructions when it's missing, and warns when Poppler's `pdftoppm` isn't installed.
 - **No API key, ever.** The environment passed to Claude Code drops every `ANTHROPIC_*` variable and every inherited `CLAUDE*` variable except the token, so an API key set in the shell can't switch the app to per-token billing.
 - **Isolation.** Every query ignores the user's own Claude Code setup: no settings files (`settingSources: []`), its own empty working directory (`data/agent`) and config directory (`data/claude`), only the tutor's MCP server (`strictMcpConfig`), `permissionMode: 'dontAsk'`, prompts sent verbatim, and `WebSearch` as the only built-in tool. No CLAUDE.md, memory, plugins or hooks reach the tutor.
 - **Transcripts** live in SQLite (`agent_entries`, see [04-data-model.md](04-data-model.md)), so Claude Code's local cleanup or a moved repo loses nothing. Deleting a goal deletes its transcripts.
@@ -44,7 +44,7 @@ The backend:
 | `.md` / `.txt` | Stored, with the text cached in `files.text_cache` |
 | URL | Fetched server-side once at upload. A PDF link is stored as a PDF; plain text is stored as-is; HTML is converted to Markdown by the side model. Text goes in `text_cache`. A "Refresh" button refetches it |
 
-Size limits: 5 MB per image (the API limit) and 20 MB per project in total, so the files fit the 32 MB request limit after base64. Both live in `src/server/core/config.ts`.
+Size limits: 5 MB per image (the API limit) and 100 MB per project in total. A thread's first prompt attaches files only up to 20 MB, so it fits the 32 MB request limit after base64; a file over 5 MB, or past that budget, is read on demand with Claude Code's `Read` instead (see [02-agent.md](02-agent.md#context-assembly)). Reading PDF pages needs Poppler (`scoop install poppler` on Windows). The limits live in `src/server/core/config.ts`.
 
 ## Caching and cost
 

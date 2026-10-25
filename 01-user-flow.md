@@ -50,9 +50,10 @@ All probe messages live in the study's main thread (`nodeId = null`).
 
 - **Default path.** The tutor picks the next node (see [03-graph.md](03-graph.md#next-node-selection)), calls `focus_node`, and runs the per-node loop in that node's thread:
   1. **Motivate:** why this node, and why now.
-  2. **Establish:** state it plainly if it's an unconditional truth, or derive it with a motivated step, Socratic or expository.
+  2. **Establish:** state it plainly if it's an unconditional truth, or derive it with a motivated step, Socratic or expository. Socratic questions are asked in chat and answered in the user's own words.
   3. **Connect:** make the dependency edge explicit.
-  4. **Quiz-check:** `quiz` items tagged with the `nodeId`. The result drives the node's state.
+  4. **Quiz-check:** `quiz` items tagged with the `nodeId`, announced before they come. The result drives the node's state. The results show the moment the user submits; the tutor then checks in, supportively (what felt missing, where they got stuck and why), and waits for the reply before moving on.
+- **Balance.** A lesson is roughly 60% conversation, 40% quizzes.
 - **Free navigation.** Clicking any node opens its thread (node threads exist only after approval). If any ancestor isn't Known, a warning banner lists those ancestors with two buttons: **Go to <ancestor>** and **Continue anyway**. A node whose thread is empty starts its lesson by itself, with no visible user message.
 - **Revisiting.** A Known node can be reopened at any time. Its thread continues where it left off, and the tutor can review the node or quiz it again.
 - **Done.** The study is complete when the goal node is Known: a burst of confetti over the map and a "Goal complete" card. Every node stays reopenable after that.

@@ -1,17 +1,43 @@
 import type Anthropic from '@anthropic-ai/sdk'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { mediaType } from '../routes/files'
+import { FILES_DIR, MAX_ATTACHED_BYTES, ON_DEMAND_BYTES } from '../core/config'
+import { filePath, mediaType } from '../routes/files'
 import { nextNode, weakAncestors } from './graph'
 import { loadGraph } from './plan'
 import { probeStrands } from './quiz'
 
 type ContentBlock = Anthropic.Beta.BetaContentBlockParam
 
+/** Read may open only this project's copies, nothing else on the machine. */
+export function canRead(projectId: string, input: unknown) {
+  const path = (input as { file_path?: unknown } | null)?.file_path
+  if (typeof path !== 'string') return false
+  const rel = relative(join(FILES_DIR, projectId), resolve(path))
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+/** Files attach in upload order up to the budget; big ones are copied to disk and listed for Read instead. */
 export function fileBlocks(db: DatabaseSync, projectId: string): ContentBlock[] {
   const files = db
-    .prepare('SELECT kind, name, data, text_cache AS text FROM files WHERE project_id = ? ORDER BY created_at, rowid')
-    .all(projectId) as { kind: string; name: string; data: Uint8Array | null; text: string | null }[]
+    .prepare('SELECT id, kind, name, data, text_cache AS text FROM files WHERE project_id = ? ORDER BY created_at, rowid')
+    .all(projectId) as { id: string; kind: string; name: string; data: Uint8Array | null; text: string | null }[]
+  let attached = 0
   return files.map((f): ContentBlock => {
+    const size = f.data ? f.data.length : Buffer.byteLength(f.text ?? '')
+    if (size > ON_DEMAND_BYTES || attached + size > MAX_ATTACHED_BYTES) {
+      // Rewritten for every new thread, so a refreshed URL is never stale.
+      const path = filePath(projectId, f)
+      mkdirSync(dirname(path), { recursive: true })
+      writeFileSync(path, f.data ?? f.text ?? '')
+      const mb = (size / 1024 / 1024).toFixed(1)
+      return {
+        type: 'text',
+        text: `<file name="${f.name}" size="${mb} MB" path="${path}">Too large to attach. Open it with the Read tool when you need it; for a PDF, pass \`pages\`, at most 20 pages per call.</file>`,
+      }
+    }
+    attached += size
     const data = f.data ? Buffer.from(f.data).toString('base64') : ''
     if (f.kind === 'pdf') return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data }, title: f.name }
     if (f.kind === 'image') {

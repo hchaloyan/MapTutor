@@ -75,14 +75,14 @@ test('rejects an image over 5 MB', async () => {
 
 test('enforces the project total and frees room on delete', async () => {
   const { app, projectId } = await setup()
-  const a = (await upload(app, projectId, 'a.pdf', Buffer.alloc(6 * MB))).json()
-  await upload(app, projectId, 'b.pdf', Buffer.alloc(6 * MB))
-  const over = await upload(app, projectId, 'c.pdf', Buffer.alloc(9 * MB))
+  const a = (await upload(app, projectId, 'a.pdf', Buffer.alloc(50 * MB))).json()
+  await upload(app, projectId, 'b.pdf', Buffer.alloc(40 * MB))
+  const over = await upload(app, projectId, 'c.pdf', Buffer.alloc(11 * MB))
   expect(over.statusCode).toBe(413)
-  expect(over.json().message).toBe("A project's files are limited to 20 MB in total.")
+  expect(over.json().message).toBe("A project's files are limited to 100 MB in total.")
   expect(await fileCount(app, projectId)).toBe(2)
   await app.inject({ method: 'DELETE', url: `/api/files/${a.id}` })
-  expect((await upload(app, projectId, 'c.pdf', Buffer.alloc(9 * MB))).statusCode).toBe(201)
+  expect((await upload(app, projectId, 'c.pdf', Buffer.alloc(11 * MB))).statusCode).toBe(201)
 })
 
 test('upload to an unknown project is a 404', async () => {

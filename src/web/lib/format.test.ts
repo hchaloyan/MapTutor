@@ -13,7 +13,7 @@ test('goal names fall back to the typed goal', () => {
 test('phase labels mark done', () => {
   expect(phaseLabel('probe')).toEqual({ text: 'Probe', done: false })
   expect(phaseLabel('teach')).toEqual({ text: 'Teach', done: false })
-  expect(phaseLabel('done')).toEqual({ text: 'Done ✓', done: true })
+  expect(phaseLabel('done')).toEqual({ text: 'Done', done: true })
 })
 
 test('mastery segments are ordered and skip empty states', () => {
@@ -40,8 +40,8 @@ test('file badges by kind and extension', () => {
 })
 
 test('used label', () => {
-  expect(usedLabel(5_662_310)).toBe('5.4 of 20 MB used')
-  expect(usedLabel(0)).toBe('0 of 20 MB used')
+  expect(usedLabel(5_662_310)).toBe('5.4 of 100 MB used')
+  expect(usedLabel(0)).toBe('0 of 100 MB used')
 })
 
 test('split clamps to 25–75', () => {

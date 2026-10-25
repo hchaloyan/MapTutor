@@ -41,6 +41,8 @@ export function turnReducer(t: Turn, a: TurnAction): Turn {
     }
     case 'event':
       switch (a.event) {
+        case 'answered':
+          return { ...t, refetch: t.refetch + 1 }
         case 'text':
           return { ...t, segments: [...t.segments.slice(0, -1), (t.segments.at(-1) ?? '') + a.data.delta] }
         case 'status':

@@ -1,3 +1,4 @@
+import { ArrowLeft } from 'lucide-react'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Chat } from '../components/Chat'
 import { Confetti } from '../components/Confetti'
@@ -212,7 +213,7 @@ export function Goal({ goalId }: { goalId: string }) {
         left={
           <>
             <button className="text-action muted back-link ellipsis" onClick={() => navigate(`/projects/${study.projectId}`)}>
-              ← {projectName}
+              <ArrowLeft size={16} aria-hidden="true" /> {projectName}
             </button>
             <span className="goal-title ellipsis" title={study.goal}>
               {goalName(study)}

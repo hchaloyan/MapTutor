@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { ProjectPage } from '../components/ProjectPage'
 import { Sidebar } from '../components/Sidebar'
@@ -60,7 +61,7 @@ export function Projects({ projectId }: { projectId: string | null }) {
             <h1>No projects yet</h1>
             <p>A project is a subject and its materials: slides, notes, links. Each one holds as many goals as you like.</p>
             <button className="btn btn-primary" onClick={() => setCreating(true)}>
-              + New project
+              <Plus size={16} strokeWidth={3} /> New project
             </button>
           </div>
         ) : (

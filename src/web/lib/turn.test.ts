@@ -30,6 +30,12 @@ test('card and focus events ask for a refetch, and a sync drops what the thread 
   expect(liveSegments(turnReducer(focused, { type: 'synced', upTo: focused.committed }))).toEqual(['Lesson'])
 })
 
+test('a stored answer asks for a refetch and keeps the waiting segment', () => {
+  const t = run({ type: 'start', now: 1 }, ev('answered'))
+  expect(t.refetch).toBe(1)
+  expect(liveSegments(turnReducer(t, { type: 'synced', upTo: t.committed }))).toEqual([''])
+})
+
 test('start is ignored while a turn runs, and errors end it', () => {
   const t = run({ type: 'start', now: 1 }, ev('text', { delta: 'x' }))
   expect(turnReducer(t, { type: 'start', now: 9 })).toBe(t)

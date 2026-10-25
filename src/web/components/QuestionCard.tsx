@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { useState } from 'react'
 import type { Card } from '../lib/api'
 import { questionAnswer } from '../lib/cards'
@@ -51,7 +52,7 @@ export function QuestionCard({ card, onAnswer, disabled }: { card: Card; onAnswe
           aria-checked={multi ? picked.includes(o.label) : undefined}
           onClick={() => (multi ? toggle(o.label) : onAnswer({ answers: [o.label] }))}
         >
-          {multi && <span className={`box${picked.includes(o.label) ? ' on' : ''}`}>{picked.includes(o.label) && '✓'}</span>}
+          {multi && <span className={`box${picked.includes(o.label) ? ' on' : ''}`}>{picked.includes(o.label) && <Check size={13} strokeWidth={3} />}</span>}
           <span className="menu-text">
             <span className="menu-label">{o.label}</span>
             {o.description && <span className="menu-desc">{o.description}</span>}
@@ -61,7 +62,7 @@ export function QuestionCard({ card, onAnswer, disabled }: { card: Card; onAnswe
       <div className="menu-row other">
         {multi && (
           <button className={`box${otherOn ? ' on' : ''}`} aria-label="Include my own answer" onClick={() => setOtherOn(!otherOn)}>
-            {otherOn && '✓'}
+            {otherOn && <Check size={13} strokeWidth={3} />}
           </button>
         )}
         <input

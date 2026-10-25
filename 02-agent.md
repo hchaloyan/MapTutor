@@ -10,7 +10,7 @@ The tutor runs on the Claude Agent SDK. Each thread (the main thread, or one nod
 
 ## Principle
 
-The tutor never drives the UI with free text. Anything structured (quizzes, goal questions, the graph, node states) goes through a tool call that the app renders and validates. Chat text is for explanation only.
+The tutor never drives the UI with free text. Anything structured (quizzes, goal questions, the graph, node states) goes through a tool call that the app renders and validates. Chat text is for explanation and conversation, including open questions the user answers in their own words.
 
 ## System prompt
 
@@ -79,7 +79,6 @@ propose_graph({
 ```
 
 The app grades quizzes itself by comparing `chosenOptionId` to `correctOptionId`. The tutor receives the results and never grades its own questions.
-
 The skill says "the tool already tells you to keep options even", so the `quiz` tool description must say it: options are parallel in length, grain size, and register, and none carries its own justification.
 
 ### Server-only tools
@@ -108,8 +107,9 @@ Initial node states are computed by the app from probe evidence, not supplied by
 
 A turn is a chain of **hops** (at most 20). A hop is one `query()` on the thread's session, allowed up to 20 model calls, and it runs until the model ends its turn, a card defers, or `focus_node` switches threads.
 
-1. **Tools.** The tutor's tools are an MCP server named `tutor`, served by MapTutor's own Fastify server at `POST /mcp/:hop` (a random id per hop, removed when the hop ends). Claude Code sees them as `mcp__tutor__<name>`, next to its own `WebSearch`. A `PreToolUse` hook asks the loop to decide each call:
+1. **Tools.** The tutor's tools are an MCP server named `tutor`, served by MapTutor's own Fastify server at `POST /mcp/:hop` (a random id per hop, removed when the hop ends). Claude Code sees them as `mcp__tutor__<name>`, next to its own `WebSearch` and `Read`. A `PreToolUse` hook asks the loop to decide each call (and each `Read`, which is allowed only on the project's file copies in `data/files/<projectId>/`):
    - A tool the current phase doesn't allow is denied with the reason, which Claude sees as an error.
+   - After a quiz-check is answered, every tool in that thread is denied until the user writes there: the tutor checks in first. (A note in the tool result was ignored; the rule lives in the appendix, and the hook enforces it.)
    - A card batched with other calls in one message can't defer, so its handler refuses it ("call it on its own"). The prompt also says to call one tool per message.
 2. **Server-only tool:** its handler runs at once and Claude continues within the hop. `focus_node` ends the hop after its result (`PostToolUse` returns `continue: false`); the next hop starts in the target thread with an `[App: …]` note.
 3. **Client-rendered tool:** the hook returns `defer`. The hop ends with the call deferred; the loop runs the tool's pause step once, marks the call pending and streams the card. When the user answers, the route grades or applies the answer exactly once and stores the `tool_result`, then resumes the session with **no prompt**. The hook fires again for the same `tool_use_id`, finds the stored answer, and the handler returns it.
@@ -117,7 +117,7 @@ A turn is a chain of **hops** (at most 20). A hop is one `query()` on the thread
 
 **The `messages` table is a display mirror** of the sessions: thread views, summaries and pending cards read it; the model's context is the session. The prompt row is written when a session starts, assistant rows as they arrive, and tool results unless the route already stored that answer.
 
-Responses stream over SSE: `text { delta }`, `status { kind: 'thinking' | 'searching' }` (when a thinking block or a web search starts; the client runs the timer), `card`, `focus { nodeId }`, `error { message }`, and exactly one `done { awaiting }`.
+Responses stream over SSE: `answered` (first, on a turn that resumes a stored card answer: the client refetches so the results show before the tutor replies), `text { delta }`, `status { kind: 'thinking' | 'searching' }` (when a thinking block or a web search starts; the client runs the timer), `card`, `focus { nodeId }`, `error { message }`, and exactly one `done { awaiting }`.
 
 **Turn control.** One turn runs per study at a time; anything else that would start one gets a 409.
 
@@ -132,7 +132,7 @@ Each thread's session holds, in order:
 | Part | Contents |
 |---|---|
 | System | The fixed prompt and app appendix, identical for every session |
-| First prompt | The project files (PDFs and images as native content blocks; Markdown and fetched URLs as text), the user's text, and `<study_state>` |
+| First prompt | The project files (PDFs and images as native content blocks; Markdown and fetched URLs as text), the user's text, and `<study_state>`. A file over 5 MB, or one that would push the attached files past 20 MB, isn't attached: it's copied to `data/files/<projectId>/` and listed with its path, and the tutor opens the pages it needs with `Read` (see [Large files](#large-files)) |
 | Later prompts | The user's text (or an `[App: …]` note) and `<study_state>` |
 
 Claude Code caches the session's prefix on its own.
@@ -142,6 +142,8 @@ Claude Code caches the session's prefix on its own.
 **Why append-only.** The system prompt never carries state, and the tool set is the same in every phase (the hook denies a tool outside the current phase), so a session's history is never edited; state rides on new prompts instead. The project files go into a thread's first prompt only: a file added or changed mid-study reaches threads started after the change.
 
 Per-node threads keep each session small and make out-of-order navigation cheap. A node's thread never carries another node's transcript, only that node's summary.
+
+**Large files.** A textbook won't fit one request (32 MB, 600 PDF pages), so lecture notes stay attached and the textbook is read on demand. Claude Code's `Read` renders PDF pages to images with Poppler's `pdftoppm`, at most 20 pages per call; the server warns at startup when Poppler is missing. The copies are rewritten whenever a thread starts and removed with their file or project.
 
 **Summaries.** When a node first becomes Known, the server makes a cheap side call: "Summarize what was established in this node and how it connects, in 2–3 sentences." The result is stored in `node.summary`.
 

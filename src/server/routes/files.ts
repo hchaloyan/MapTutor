@@ -1,6 +1,8 @@
 import type { FastifyInstance } from 'fastify'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
-import { MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from '../core/config'
+import { FILES_DIR, MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from '../core/config'
 import { requireProject } from '../core/db'
 import { httpError } from '../core/http'
 import { recordUsage } from '../core/usage'
@@ -24,6 +26,12 @@ export function mediaType(file: { kind: string; name: string }): string {
   return file.kind === 'pdf' ? 'application/pdf' : (IMAGE_TYPES[extension(file.name)] ?? 'application/octet-stream')
 }
 
+/** Where a file the tutor opens on demand is copied: its id, with an extension Read recognises. */
+export const filePath = (projectId: string, f: { id: string; kind: string; name: string }) =>
+  join(FILES_DIR, projectId, `${f.id}.${f.kind === 'pdf' ? 'pdf' : f.kind === 'image' ? extension(f.name) : 'md'}`)
+
+const LIMIT = "A project's files are limited to 100 MB in total."
+
 const SIZE = 'coalesce(length(data), length(CAST(text_cache AS BLOB)), 0)'
 const FILE_INFO = `SELECT id, kind, name, url, ${SIZE} AS size, created_at AS createdAt FROM files`
 
@@ -43,7 +51,7 @@ export function checkRoom(db: DatabaseSync, projectId: string, size: number, rep
   const { used } = db
     .prepare(`SELECT coalesce(sum(${SIZE}), 0) AS used FROM files WHERE project_id = ? AND id IS NOT ?`)
     .get(projectId, replacingFileId ?? null) as { used: number }
-  if (used + size > MAX_PROJECT_BYTES) throw httpError(413, "A project's files are limited to 20 MB in total.")
+  if (used + size > MAX_PROJECT_BYTES) throw httpError(413, LIMIT)
 }
 
 export function decodeText(bytes: Uint8Array) {
@@ -80,7 +88,7 @@ async function fetchUrl(raw: string, htmlToMarkdown: HtmlToMarkdown, onUsage: (u
   const rejection = !['application/pdf', 'text/plain', 'text/markdown', 'text/html'].includes(type)
     ? httpError(415, `Unsupported page type: ${type || 'unknown'}.`)
     : declared > MAX_PROJECT_BYTES
-      ? httpError(413, "A project's files are limited to 20 MB in total.")
+      ? httpError(413, LIMIT)
       : null
   if (rejection) {
     await res.body?.cancel()
@@ -149,6 +157,7 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
     if (!file.url) throw httpError(400, 'Only imported URLs can be refreshed.')
     const imported = await fetchUrl(file.url, htmlToMarkdown, u => recordUsage(db, file.projectId, null, u))
     checkRoom(db, file.projectId, importedSize(imported), file.id)
+    rmSync(filePath(file.projectId, file), { force: true }) // the kind, and so the copy's name, may change
     db.prepare('UPDATE files SET kind = ?, data = ?, text_cache = ? WHERE id = ?').run(imported.kind, imported.data, imported.text, file.id)
     return fileInfo(db, file.id)
   })
@@ -160,7 +169,8 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
   })
 
   app.delete<{ Params: { id: string } }>('/api/files/:id', async (req, reply) => {
-    requireFile(db, req.params.id)
+    const file = requireFile(db, req.params.id)
+    rmSync(filePath(file.projectId, file), { force: true })
     db.prepare('DELETE FROM files WHERE id = ?').run(req.params.id)
     return reply.code(204).send()
   })

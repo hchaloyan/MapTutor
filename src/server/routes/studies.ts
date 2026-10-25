@@ -84,6 +84,8 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; runH
     const emit: Emit = (event, data) => {
       if (!reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
+    // A null prompt resumes a stored card answer: the client shows it before the tutor replies.
+    if (!prompt) emit('answered', {})
     try {
       await runTurn({ db, studyId, nodeId, prompt, runHop, emit, signal: turn.signal })
     } catch (err) {

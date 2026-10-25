@@ -101,10 +101,8 @@ function script(messages: Messages): Reply {
       const results = json().results as { correct: boolean }[]
       if (phase === 'probe' || phase === 'plan') return { text: "Here's the plan I'd suggest.", tool: { name: 'propose_graph', input: proposal(APPROACH) } }
       if (phase === 'done') return { text: "That's the goal. Nicely done." }
-      if (node && results.some(r => !r.correct)) {
-        return { text: 'Not quite. The key is the limit: the slope comes from shrinking $h$ to $0$. Try it again.', tool: { name: 'quiz', input: check(node, labelOf(node)) } }
-      }
-      return focus('Correct.')
+      // After a quiz-check the tutor checks in and waits; the user's reply moves the lesson on.
+      return { text: results.some(r => !r.correct) ? 'Not quite. What felt missing, or where did you get stuck?' : 'Correct! Anything still feel shaky?' }
     }
   }
 
@@ -114,6 +112,10 @@ function script(messages: Messages): Reply {
   // What the user typed since the tutor last spoke; a Retry adds an app note after it.
   const since = messages.slice(messages.findLastIndex(m => m.role === 'assistant') + 1)
   const said = since.flatMap(blocksOf).findLast(b => b.type === 'text' && !isApp(b))?.text
+  if (said && node && phase === 'teach') {
+    if (new RegExp(`^- ${node} \\[\\w+\\] "[^"]*" — known`, 'm').test(state)) return focus('Good.')
+    return { text: 'The key is the limit: the slope comes from shrinking $h$ to $0$. Try it again.', tool: { name: 'quiz', input: check(node, labelOf(node)) } }
+  }
   if (said && phase === 'probe' && !toolUses.some(b => b.name === 'ask_user_question')) {
     return {
       text: "Happy to help. First, what's the aim?",

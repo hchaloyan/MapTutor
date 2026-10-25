@@ -163,8 +163,8 @@ export function agentEngine(db: DatabaseSync, mcpBase: () => string): RunHop {
         model: TUTOR_MODEL,
         effort: 'high',
         systemPrompt: systemPrompt(),
-        tools: ['WebSearch'],
-        allowedTools: ['WebSearch', 'mcp__tutor__*'],
+        tools: ['WebSearch', 'Read'],
+        allowedTools: ['WebSearch', 'Read', 'mcp__tutor__*'],
         mcpServers: { tutor: { type: 'http', url: `${mcpBase()}/mcp/${hopId}` } },
         maxTurns: MAX_TURNS,
         includePartialMessages: true,
@@ -179,6 +179,13 @@ export function agentEngine(db: DatabaseSync, mcpBase: () => string): RunHop {
               const d = hop.decide(name, tool_input, tool_use_id)
               if (d.kind === 'answer') answers.set(name, [...(answers.get(name) ?? []), d.outcome])
               return hookOutput(d)
+            }],
+          }, {
+            // Read opens the project's large files on demand; the loop limits it to them.
+            matcher: '^Read$',
+            hooks: [async raw => {
+              const { tool_input, tool_use_id } = raw as PreToolUseHookInput
+              return hookOutput(hop.decide('Read', tool_input, tool_use_id))
             }],
           }],
           // focus_node ends the hop after its tool_result; the loop continues in the other thread (Spike S5).

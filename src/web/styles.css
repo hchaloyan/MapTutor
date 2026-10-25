@@ -299,6 +299,9 @@ a {
 }
 .sidebar-head .text-action {
   letter-spacing: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 .sidebar-new input,
 .project-rename input {
@@ -457,6 +460,9 @@ a {
 .goal-phase {
   width: 70px;
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 3px;
   font-size: 12px;
   font-weight: 800;
   color: var(--muted);
@@ -470,8 +476,8 @@ a {
   padding: 0;
   width: 16px;
   flex: none;
+  display: grid;
   color: var(--muted);
-  font-weight: 800;
   cursor: pointer;
   visibility: hidden;
 }
@@ -599,6 +605,9 @@ a {
   max-width: 180px;
   flex: none;
 }
+.back-link svg {
+  vertical-align: -3px;
+}
 .goal-title {
   font-size: 17px;
   font-weight: 800;
@@ -618,6 +627,9 @@ a {
 }
 .step.on {
   color: var(--ink);
+}
+.step svg {
+  margin-left: 3px;
 }
 .step.on::before {
   content: '';
@@ -853,12 +865,6 @@ body.resizing {
   padding: 4px 0;
   max-height: 160px;
   field-sizing: content;
-}
-.stop-icon {
-  width: 9px;
-  height: 9px;
-  border-radius: 2px;
-  background: #fff;
 }
 
 /* Markdown inside tutor messages and cards */
@@ -1113,6 +1119,7 @@ div.option {
   background: var(--missed);
 }
 .chev {
+  display: flex;
   color: var(--muted);
 }
 .result-open {
@@ -1218,6 +1225,9 @@ button.menu-row:hover:not(:disabled) {
   color: var(--muted);
 }
 .plan-outcome.approved {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--ok-text);
 }
 .plan-suggest textarea {
@@ -1444,8 +1454,8 @@ button.menu-row:hover:not(:disabled) {
   height: 30px;
   border: 0;
   background: none;
-  font-weight: 800;
-  font-size: 15px;
+  display: grid;
+  place-items: center;
   cursor: pointer;
 }
 .zoom button + button {

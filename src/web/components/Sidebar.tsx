@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import type { ProjectSummary } from '../lib/api'
 import { countLabel } from '../lib/format'
@@ -33,7 +34,7 @@ export function Sidebar(props: {
       <div className="sidebar-head">
         <span>PROJECTS</span>
         <button className="text-action" onClick={() => props.setCreating(true)}>
-          + New
+          <Plus size={14} strokeWidth={3} /> New
         </button>
       </div>
       {props.creating && (

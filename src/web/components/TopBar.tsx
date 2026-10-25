@@ -1,3 +1,4 @@
+import { Moon, Sun } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTheme } from '../lib/theme'
 
@@ -11,7 +12,7 @@ export function TopBar({ left, center, right }: { left: ReactNode; center?: Reac
       <div className="topbar-right">
         {right}
         <button className="btn btn-secondary btn-small" onClick={toggle} aria-label={theme === 'dark' ? 'Use the light theme' : 'Use the dark theme'}>
-          {theme === 'dark' ? '☀' : '☾'}
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>
       </div>
     </header>

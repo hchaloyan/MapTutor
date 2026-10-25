@@ -1,3 +1,4 @@
+import { Square } from 'lucide-react'
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Card, ThreadItem } from '../lib/api'
 import { errorView, liveSegments, type Turn } from '../lib/turn'
@@ -119,7 +120,7 @@ export function Chat(props: {
         />
         {turn.running ? (
           <button className="btn btn-primary" onClick={props.onStop}>
-            <span className="stop-icon" aria-hidden="true" />
+            <Square size={12} fill="currentColor" strokeWidth={0} />
             Stop
           </button>
         ) : (

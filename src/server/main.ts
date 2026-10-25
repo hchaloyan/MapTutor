@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { mkdirSync } from 'node:fs'
 import { buildApp } from './app'
 import { AGENT_DIR, CLAUDE_HOME } from './core/config'
@@ -11,6 +12,10 @@ if (!fake && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
     'MapTutor uses your Claude subscription. Run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN to the token it prints (PowerShell: setx CLAUDE_CODE_OAUTH_TOKEN "<token>"), open a new terminal, and start the server again.',
   )
   process.exit(1)
+}
+// The tutor's Read tool renders PDF pages with Poppler's pdftoppm; without it, large files can't be opened.
+if (!fake && spawnSync('pdftoppm', ['-v']).error) {
+  console.warn('Poppler is not installed, so the tutor cannot open large PDFs. Install it (for example `scoop install poppler`) and restart.')
 }
 for (const dir of ['data', AGENT_DIR, CLAUDE_HOME]) mkdirSync(dir, { recursive: true })
 const db = openDb(process.env.DB_PATH ?? (fake ? 'data/maptutor-fake.db' : 'data/maptutor.db'))

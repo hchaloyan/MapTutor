@@ -287,6 +287,7 @@ test('retry after a failed answer resumes the card call without re-grading', asy
   ])
   await t.send({ text: 'help' })
   expect(events((await t.answer('tu_q', { choices: { q1: 'b' } })).payload)).toEqual([
+    { event: 'answered', data: {} },
     { event: 'error', data: { message: LIMIT } },
     { event: 'done', data: { awaiting: false } },
   ])

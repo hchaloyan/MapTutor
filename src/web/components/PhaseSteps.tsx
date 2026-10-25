@@ -1,3 +1,4 @@
+import { Check } from 'lucide-react'
 import { Fragment } from 'react'
 import type { Phase } from '../lib/api'
 
@@ -15,7 +16,8 @@ export function PhaseSteps({ phase }: { phase: Phase }) {
       {STEPS.map(([p, label], i) => (
         <Fragment key={p}>
           {i > 0 && <i className="step-line" />}
-          <span className={`step${p === phase ? ' on' : ''}`}>{p === 'done' && phase === 'done' ? 'Done ✓' : label}</span>
+          <span className={`step${p === phase ? ' on' : ''}`}>{label}
+            {p === 'done' && phase === 'done' && <Check size={14} strokeWidth={3} />}</span>
         </Fragment>
       ))}
     </div>

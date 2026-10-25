@@ -9,6 +9,10 @@ export const CLAUDE_HOME = resolve('data/claude')
 export const MAX_TURNS = 20 // model calls per hop
 
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // API limit per image
-// 32 MB request limit after base64 (4/3), with headroom for the prompt and thread.
+export const MAX_PROJECT_BYTES = 100 * 1024 * 1024
+// What a thread's first prompt attaches: the 32 MB request limit after base64 (4/3), with headroom for the prompt and thread.
 // ponytail: byte proxy for the token budget; count tokens if PDFs with many pages hit the 600-page or context limit
-export const MAX_PROJECT_BYTES = 20 * 1024 * 1024
+export const MAX_ATTACHED_BYTES = 20 * 1024 * 1024
+// A file over this size, or past the attached budget, is copied to FILES_DIR and opened with Read on demand.
+export const ON_DEMAND_BYTES = 5 * 1024 * 1024
+export const FILES_DIR = resolve('data/files')

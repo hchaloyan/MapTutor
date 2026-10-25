@@ -1,3 +1,4 @@
+import { X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { api, type FileInfo, type Project, uploadAll } from '../lib/api'
 import { fileBadge, formatBytes, usedLabel } from '../lib/format'
@@ -91,7 +92,7 @@ export function Files({ project, onChange }: { project: Project; onChange(): voi
                 </button>
               )}
               <button className="row-x" aria-label={`Delete ${f.name}`} onClick={() => setDeleting(f)}>
-                ✕
+                <X size={16} />
               </button>
             </div>
           )
@@ -128,7 +129,7 @@ export function Files({ project, onChange }: { project: Project; onChange(): voi
                 <span>
                   Drop slides, notes or images here, or {browse} · {link}
                 </span>
-                <span className="file-note">{busy === 'upload' ? 'Uploading…' : 'PDF, images, .md, .txt, links · up to 20 MB per project'}</span>
+                <span className="file-note">{busy === 'upload' ? 'Uploading…' : 'PDF, images, .md, .txt, links · up to 100 MB per project'}</span>
               </>
             )}
           </div>

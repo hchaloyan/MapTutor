@@ -201,6 +201,23 @@ test('posting in a node thread focuses it, and app notes stay out of the thread 
   expect((await t.thread('limits')).map((i: { text: string }) => i.text)).toEqual(['teach me limits', 'Limits it is.'])
 })
 
+test('after a quiz-check, tutor tools are refused until the user replies', async () => {
+  const t = await setupApp([
+    toolCall('quiz', { items: [check('q1', 'slope')] }, 'tu_q'),
+    toolCall('quiz', { items: [check('q2', 'slope')] }, 'tu_q2'),
+    toolCall('set_node_state', { nodeId: 'slope', state: 'frontier', reason: 'r' }, 'tu_s'),
+    text('What felt shaky?'),
+    toolCall('quiz', { items: [check('q3', 'slope')] }, 'tu_q3'),
+  ])
+  await t.send({ text: 'teach me slope', nodeId: 'slope' })
+  const res = await t.answer('tu_q', { choices: { q1: 'b' } })
+  expect(events(res.payload).at(-1)).toEqual(['done', { awaiting: false }])
+  // Both calls after the check were refused, the second one even though the first refusal is now the newest row.
+  for (const i of [2, 3]) expect(JSON.stringify(t.calls[i].at(-1))).toContain("The user hasn't replied since the quiz")
+  const reply = await t.send({ text: 'I forgot to add them up.', nodeId: 'slope' })
+  expect(events(reply.payload).at(-1)).toEqual(['done', { awaiting: true }])
+})
+
 test('a node that becomes known gets one summary from its thread', async () => {
   const transcripts: string[] = []
   const summarize = async (transcript: string) => (transcripts.push(transcript), ' Slope is rise over run. ')

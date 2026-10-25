@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify'
+import { rmSync } from 'node:fs'
+import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
+import { FILES_DIR } from '../core/config'
 import { LOCAL_USER_ID, requireProject } from '../core/db'
 import { listFiles } from './files'
 import { httpError } from '../core/http'
@@ -73,6 +76,7 @@ export function projectRoutes(app: FastifyInstance, db: DatabaseSync) {
     requireProject(db, req.params.id)
     const studies = db.prepare('SELECT id FROM studies WHERE project_id = ?').all(req.params.id) as { id: string }[]
     deleteStudySessions(db, studies.map(s => s.id))
+    rmSync(join(FILES_DIR, req.params.id), { recursive: true, force: true })
     db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id)
     return reply.code(204).send()
   })

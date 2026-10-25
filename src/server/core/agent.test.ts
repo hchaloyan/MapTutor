@@ -179,13 +179,18 @@ test('agentEngine maps a scripted SDK stream onto hop callbacks', async () => {
   const o = sdk.options
   expect(o.resume).toBeUndefined()
   expect(o).toMatchObject({
-    model: TUTOR_MODEL, systemPrompt: systemPrompt(), settingSources: [], cwd: AGENT_DIR, tools: ['WebSearch'],
-    allowedTools: ['WebSearch', 'mcp__tutor__*'], permissionMode: 'dontAsk', strictMcpConfig: true, verbatimPrompts: true,
+    model: TUTOR_MODEL, systemPrompt: systemPrompt(), settingSources: [], cwd: AGENT_DIR, tools: ['WebSearch', 'Read'],
+    allowedTools: ['WebSearch', 'Read', 'mcp__tutor__*'], permissionMode: 'dontAsk', strictMcpConfig: true, verbatimPrompts: true,
     effort: 'high', maxTurns: MAX_TURNS, includePartialMessages: true,
   })
   expect(o.sessionStore).toBeDefined()
   expect(o.env.MCP_CONNECTION_NONBLOCKING).toBe('false')
   expect(o.hooks.PreToolUse[0].matcher).toBe('^mcp__tutor__')
+  // Read goes through the loop's decide too, which limits it to the project's files.
+  expect(o.hooks.PreToolUse[1].matcher).toBe('^Read$')
+  const read = await o.hooks.PreToolUse[1].hooks[0]({ tool_name: 'Read', tool_input: { file_path: 'x' }, tool_use_id: 'r1' })
+  expect(read.hookSpecificOutput.permissionDecision).toBe('allow')
+  expect(seen.at(-1)).toBe('decide Read r1')
   expect(o.mcpServers.tutor.type).toBe('http')
   expect(url.startsWith(`${base}/mcp/`)).toBe(true)
   expect((await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(404) // the hop is gone

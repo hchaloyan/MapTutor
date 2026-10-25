@@ -1,3 +1,4 @@
+import { Check, ChevronDown, ChevronUp, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { Card } from '../lib/api'
 import { LETTERS, type QuizItem, quizKey, quizSummary } from '../lib/cards'
@@ -112,13 +113,13 @@ function QuizResults({ card }: { card: Card }) {
         <div key={item.id} className="result">
           <button className="result-row" aria-expanded={open.has(item.id)} onClick={() => toggle(item.id)}>
             <span className={`mark ${right ? 'ok' : 'no'}`} aria-label={right ? 'Correct' : 'Wrong'}>
-              {right ? '✓' : '✗'}
+              {right ? <Check size={14} strokeWidth={3} /> : <X size={14} strokeWidth={3} />}
             </span>
             <span className="result-prompt">
               <Markdown text={item.prompt} inline />
             </span>
             <span className="chev" aria-hidden="true">
-              {open.has(item.id) ? '▴' : '▾'}
+              {open.has(item.id) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </span>
           </button>
           {open.has(item.id) && (
