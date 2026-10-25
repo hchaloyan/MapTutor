@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Chat } from '../components/Chat'
+import { StudyMap } from '../components/Map'
 import { PhaseSteps } from '../components/PhaseSteps'
 import { PlanCard } from '../components/PlanCard'
+import { PrereqBanner } from '../components/PrereqBanner'
 import { QuestionCard } from '../components/QuestionCard'
 import { QuizCard } from '../components/QuizCard'
 import { SplitPane } from '../components/SplitPane'
 import { StrandPanel } from '../components/StrandPanel'
 import { TopBar } from '../components/TopBar'
-import { api, type Card, type Project, type Study, type ThreadItem } from '../lib/api'
+import { api, type Card, type NodeState, type Project, type Study, type ThreadItem } from '../lib/api'
 import { useApp } from '../lib/app'
 import { goalName } from '../lib/format'
+import { prereqText } from '../lib/graph'
 import { navigate } from '../lib/router'
 import { postStream } from '../lib/sse'
 import { idleTurn, turnReducer } from '../lib/turn'
@@ -26,6 +29,8 @@ export function Goal({ goalId }: { goalId: string }) {
   const [turn, dispatch] = useReducer(turnReducer, idleTurn)
   const [draft, setDraft] = useState('')
   const [queued, setQueued] = useState<string | null>(null)
+  const [turnThread, setTurnThread] = useState<string | null | undefined>(undefined) // where the live reply belongs
+  const [banner, setBanner] = useState<{ nodeId: string; weak: { id: string; state: NodeState }[] } | null>(null)
 
   // Refs for callbacks that outlive a render: the open thread, the latest turn, and a guard against double sends.
   const threadRef = useRef(threadId)
@@ -65,14 +70,25 @@ export function Goal({ goalId }: { goalId: string }) {
   const runTurn = useCallback(
     async (path: string, json: object) => {
       let awaiting = false
+      let ended = false
+      setTurnThread(threadRef.current)
       dispatch({ type: 'start', now: Date.now() })
       try {
         await postStream(`/api/studies/${goalId}/${path}`, json, e => {
           dispatch({ type: 'event', event: e.event, data: e.data, now: Date.now() })
-          if (e.event === 'focus') setThreadId(e.data.nodeId)
-          if (e.event === 'done') awaiting = e.data.awaiting
+          if (e.event === 'focus') {
+            setBanner(null)
+            setThreadId(e.data.nodeId)
+            setTurnThread(e.data.nodeId)
+          }
+          if (e.event === 'done') {
+            awaiting = e.data.awaiting
+            ended = true
+          }
           if (e.event === 'error' && e.data.message === 'Your Anthropic API key was rejected.') app.setKeyStatus('rejected')
         })
+        // A 204 (e.g. `open` on a thread that has history by now) sends no `done`; end the turn so it refetches.
+        if (!ended) dispatch({ type: 'event', event: 'done', data: { awaiting: false }, now: Date.now() })
       } catch (err) {
         dispatch({ type: 'fail', message: (err as Error).message })
       }
@@ -118,6 +134,33 @@ export function Goal({ goalId }: { goalId: string }) {
     [app, runTurn],
   )
 
+  /** Shows a node's thread; an empty one starts its lesson unless a turn is running. */
+  const proceed = useCallback(
+    async (nodeId: string) => {
+      setBanner(null)
+      setThreadId(nodeId)
+      const list = await loadThread(nodeId).catch(() => null)
+      if (list?.length === 0 && threadRef.current === nodeId) resume('open', { nodeId })
+    },
+    [loadThread, resume],
+  )
+
+  /** A map click (Teach/Done only): weak prerequisites show the banner first. Mid-turn it only switches the view. */
+  const openNode = useCallback(
+    async (nodeId: string) => {
+      setBanner(null)
+      setThreadId(nodeId)
+      if (busy.current) return
+      const { weak } = await api<{ weak: { id: string; state: NodeState }[] }>(
+        `/api/studies/${goalId}/nodes/${encodeURIComponent(nodeId)}/prerequisites`,
+      ).catch(() => ({ weak: [] }))
+      if (threadRef.current !== nodeId) return
+      if (weak.length) setBanner({ nodeId, weak })
+      else proceed(nodeId)
+    },
+    [goalId, proceed],
+  )
+
   // The thread or study changed on the server: refetch, then drop the live text the thread now holds.
   useEffect(() => {
     if (turn.refetch === 0 || threadRef.current === undefined) return
@@ -146,6 +189,8 @@ export function Goal({ goalId }: { goalId: string }) {
 
   const node = study.nodes.find(n => n.id === threadId)
   const pendingCard = items.some(i => i.type === 'card' && i.pending)
+  const shown = banner?.nodeId === threadId ? banner : null
+  const goTo = shown && study.nodes.find(n => n.id === shown.weak[0].id)
 
   return (
     <div className="app">
@@ -164,18 +209,42 @@ export function Goal({ goalId }: { goalId: string }) {
       />
       <main className="page">
         <SplitPane
-          left={<div className="graph-pane">{study.nodes.length === 0 ? <StrandPanel strands={study.strands} /> : null}</div>}
+          left={
+            <div className="graph-pane">
+              {study.nodes.length === 0 ? (
+                <StrandPanel strands={study.strands} />
+              ) : (
+                <StudyMap study={study} openId={threadId} clickable={study.phase === 'teach' || study.phase === 'done'} onOpen={openNode} />
+              )}
+            </div>
+          }
           right={
             <Chat
               title={node?.label ?? 'Main chat'}
               inMain={threadId === null}
-              onMain={() => setThreadId(null)}
+              onMain={() => {
+                setBanner(null)
+                setThreadId(null)
+              }}
               items={items}
-              turn={turn}
+              turn={turnThread === threadId ? turn : { ...turn, segments: [], error: null }}
               draft={draft}
               setDraft={setDraft}
               queued={!!queued}
-              composerPaused={pendingCard && !turn.running ? 'Answer the card above to continue' : null}
+              composerPaused={shown ? 'Message the tutor…' : pendingCard && !turn.running ? 'Answer the card above to continue' : null}
+              banner={
+                shown &&
+                goTo &&
+                node && (
+                  <PrereqBanner
+                    text={prereqText(shown.weak, study.nodes)}
+                    goTo={goTo}
+                    nodeLabel={node.label}
+                    onGo={() => proceed(goTo.id)}
+                    onContinue={() => proceed(node.id)}
+                  />
+                )
+              }
               onSend={() => send(draft)}
               onStop={() => api(`/api/studies/${goalId}/stop`, { method: 'POST' }).catch(() => {})}
               onRetry={() => resume('retry', threadId ? { nodeId: threadId } : {})}
