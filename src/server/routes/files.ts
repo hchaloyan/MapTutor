@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { apiKey } from '../core/anthropic'
 import { MAX_IMAGE_BYTES, MAX_PROJECT_BYTES } from '../core/config'
 import { requireProject } from '../core/db'
 import { httpError } from '../core/http'
-import { type OnUsage, recordUsage } from '../core/usage'
+import { recordUsage } from '../core/usage'
+import type { UsageRow } from '../tutor/engine'
 
 export type FileKind = 'pdf' | 'image' | 'text' | 'url'
 
@@ -54,13 +54,13 @@ export function decodeText(bytes: Uint8Array) {
   }
 }
 
-export type HtmlToMarkdown = (html: string, apiKey: string, onUsage?: OnUsage) => Promise<string>
+export type HtmlToMarkdown = (html: string, onUsage?: (u: UsageRow) => void) => Promise<string>
 
 // ponytail: regex strip, not a parser; it only trims tokens before the converter sees the page
 const stripHtml = (html: string) =>
   html.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style|noscript|svg)\b[\s\S]*?<\/\1>/gi, '')
 
-async function fetchUrl(raw: string, key: string, htmlToMarkdown: HtmlToMarkdown, onUsage: OnUsage) {
+async function fetchUrl(raw: string, htmlToMarkdown: HtmlToMarkdown, onUsage: (u: UsageRow) => void) {
   let url: URL
   try {
     url = new URL(raw)
@@ -95,7 +95,7 @@ async function fetchUrl(raw: string, key: string, htmlToMarkdown: HtmlToMarkdown
   }
   if (type === 'application/pdf') return { kind: 'pdf' as const, data: bytes, text: null }
   if (type === 'text/plain' || type === 'text/markdown') return { kind: 'url' as const, data: null, text: bytes.toString('utf8') }
-  return { kind: 'url' as const, data: null, text: await htmlToMarkdown(stripHtml(bytes.toString('utf8')), key, onUsage) }
+  return { kind: 'url' as const, data: null, text: await htmlToMarkdown(stripHtml(bytes.toString('utf8')), onUsage) }
 }
 
 const importedSize = (file: { data: Buffer | null; text: string | null }) =>
@@ -132,10 +132,9 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
     '/api/projects/:id/urls',
     { schema: { body: { type: 'object', required: ['url'], properties: { url: { type: 'string', minLength: 1, maxLength: 2000 } } } } },
     async (req, reply) => {
-      const key = apiKey(req)
       requireProject(db, req.params.id)
       const url = req.body.url.trim()
-      const imported = await fetchUrl(url, key, htmlToMarkdown, billed => recordUsage(db, req.params.id, null, billed))
+      const imported = await fetchUrl(url, htmlToMarkdown, u => recordUsage(db, req.params.id, null, u))
       checkRoom(db, req.params.id, importedSize(imported))
       const id = crypto.randomUUID()
       db.prepare('INSERT INTO files (id, project_id, kind, name, url, data, text_cache, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
@@ -146,10 +145,9 @@ export function fileRoutes(app: FastifyInstance, opts: { db: DatabaseSync; htmlT
   )
 
   app.post<{ Params: { id: string } }>('/api/files/:id/refresh', async req => {
-    const key = apiKey(req)
     const file = requireFile(db, req.params.id)
     if (!file.url) throw httpError(400, 'Only imported URLs can be refreshed.')
-    const imported = await fetchUrl(file.url, key, htmlToMarkdown, billed => recordUsage(db, file.projectId, null, billed))
+    const imported = await fetchUrl(file.url, htmlToMarkdown, u => recordUsage(db, file.projectId, null, u))
     checkRoom(db, file.projectId, importedSize(imported), file.id)
     db.prepare('UPDATE files SET kind = ?, data = ?, text_cache = ? WHERE id = ?').run(imported.kind, imported.data, imported.text, file.id)
     return fileInfo(db, file.id)

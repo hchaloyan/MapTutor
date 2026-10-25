@@ -1,18 +1,11 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
-import { TUTOR_MODEL } from '../core/config'
 import { mediaType } from '../routes/files'
-import { systemPrompt } from './prompt'
 import { nextNode, weakAncestors } from './graph'
 import { loadGraph } from './plan'
 import { probeStrands } from './quiz'
 
 type ContentBlock = Anthropic.Beta.BetaContentBlockParam
-type MessageParam = Anthropic.Beta.BetaUserMessageParam | Anthropic.Beta.BetaAssistantMessageParam
-export type { BetaMessageStreamParams as MessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-import type { BetaMessageStreamParams as MessageStreamParams } from '@anthropic-ai/sdk/resources/beta/messages/messages'
-
-const CACHE = { type: 'ephemeral', ttl: '1h' } as const
 
 export function fileBlocks(db: DatabaseSync, projectId: string): ContentBlock[] {
   const files = db
@@ -80,43 +73,4 @@ export function studyStateText(db: DatabaseSync, studyId: string, nodeId: string
     ...teachLines(study, graph, nodeId),
     '</study_state>',
   ].join('\n')
-}
-
-export function threadMessages(db: DatabaseSync, studyId: string, nodeId: string | null): MessageParam[] {
-  return (
-    db
-      .prepare('SELECT role, content FROM messages WHERE study_id = ? AND node_id IS ? ORDER BY created_at, rowid')
-      .all(studyId, nodeId) as { role: 'user' | 'assistant'; content: string }[]
-  ).map(row => ({ role: row.role, content: JSON.parse(row.content) }))
-}
-
-/** Copies the message with a cache breakpoint on its last block; stored rows are never touched. */
-function withBreakpoint(message: MessageParam): MessageParam {
-  const content = typeof message.content === 'string' ? [{ type: 'text' as const, text: message.content }] : (message.content ?? [])
-  return { ...message, content: content.map((b, i) => (i === content.length - 1 ? { ...b, cache_control: CACHE } : b)) as ContentBlock[] }
-}
-
-export function buildRequest(
-  db: DatabaseSync,
-  studyId: string,
-  nodeId: string | null,
-  tools: Anthropic.Beta.BetaToolUnion[],
-): MessageStreamParams {
-  const { projectId } = db.prepare('SELECT project_id AS projectId FROM studies WHERE id = ?').get(studyId) as { projectId: string }
-  const files = fileBlocks(db, projectId)
-  const thread = threadMessages(db, studyId, nodeId)
-  const messages: MessageParam[] = [...(files.length ? [withBreakpoint({ role: 'user', content: files })] : []), ...thread]
-  if (thread.length) messages[messages.length - 1] = withBreakpoint(messages[messages.length - 1])
-  return {
-    model: TUTOR_MODEL,
-    max_tokens: 64000,
-    betas: ['thinking-binding-controls-2026-08-01', 'server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
-    output_config: { effort: 'high' },
-    system: [{ type: 'text', text: systemPrompt(), cache_control: CACHE }],
-    tools: [...tools, { type: 'web_search_20260209', name: 'web_search' }],
-    tool_choice: { type: 'auto', disable_parallel_tool_use: true },
-    messages,
-  }
 }

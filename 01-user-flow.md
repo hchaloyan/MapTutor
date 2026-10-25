@@ -18,7 +18,7 @@ The UI says **goal** for what the code and these docs call a study. The visual d
 2. **Goal screen.** A split pane, 50/50 at first and draggable.
    - **Left: the map.** Nodes are colored by state, and the node being taught ripples. Hovering a node shows its description, summary, and quiz evidence. Clicking a node opens its thread, and a light runs along the lines into it from its prerequisites.
    - **Right: the chat** for the selected thread. Quiz, question, and plan cards render inline.
-   - **Top bar:** back to the project, the goal's title, the phase steps (Probe → Plan → Teach → Done), **Usage**, **API key**, and the theme toggle. The chat header names the open thread.
+   - **Top bar:** back to the project, the goal's title, the phase steps (Probe → Plan → Teach → Done), **Usage**, and the theme toggle. The chat header names the open thread.
 
 Before the graph exists, the left pane shows the probe strands as they get explored.
 

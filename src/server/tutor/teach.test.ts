@@ -1,10 +1,9 @@
-import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app'
 import { LOCAL_USER_ID, openDb } from '../core/db'
-import { studyStateText, type MessageStreamParams } from './context'
-import type { StreamMessage } from './loop'
+import { studyStateText } from './context'
+import { scripted } from './scripted'
 import { proposeGraphTool } from './plan'
 import { quizTool } from './quiz'
 import { focusNodeTool, setNodeStateTool } from './teach'
@@ -12,7 +11,6 @@ import { focusNodeTool, setNodeStateTool } from './teach'
 type Reply = { content: unknown[]; stop_reason: string }
 const text = (t: string): Reply => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' })
 const toolCall = (name: string, input: unknown, id = 'tu_1'): Reply => ({ content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use' })
-const KEY = { 'x-anthropic-key': 'sk-test' }
 
 const node = (id: string, kind: string, strands: string[] = []) => ({ id, label: id.toUpperCase(), kind, description: `About ${id}.`, strands })
 const GRAPH = {
@@ -61,21 +59,14 @@ function answerCheck(t: ReturnType<typeof setup>, items: ReturnType<typeof check
 
 async function setupApp(script: (Reply | (() => Promise<Reply>))[], opts: Partial<Parameters<typeof buildApp>[0]> = {}) {
   const db = openDb(':memory:')
-  const calls: MessageStreamParams[] = []
-  const streamMessage: StreamMessage = async (params, _key, onText) => {
-    calls.push(structuredClone(params))
-    const next = script.shift()!
-    const reply = typeof next === 'function' ? await next() : next
-    for (const b of reply.content as { type: string; text?: string }[]) if (b.type === 'text') onText(b.text!)
-    return reply as unknown as Anthropic.Beta.BetaMessage
-  }
-  const app = buildApp({ db, streamMessage, ...opts })
+  const { calls, runHop } = scripted(script)
+  const app = buildApp({ db, runHop, ...opts })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
   seedTeach(db, study.id)
-  const send = (body: object) => app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, headers: KEY, payload: body })
+  const send = (body: object) => app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, payload: body })
   const answer = (toolUseId: string, answer: unknown) =>
-    app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, headers: KEY, payload: { toolUseId, answer } })
+    app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, payload: { toolUseId, answer } })
   const get = async () => (await app.inject(`/api/studies/${study.id}`)).json()
   const thread = async (nodeId?: string) => (await app.inject(`/api/studies/${study.id}/thread${nodeId ? `?nodeId=${nodeId}` : ''}`)).json()
   const rows = (nodeId: string | null) =>
@@ -101,14 +92,15 @@ test('focus_node switches the turn into the node thread', async () => {
   ])
   const main = t.rows(null)
   expect(main.map(r => r.role)).toEqual(['user', 'assistant', 'user'])
-  expect(main[2].content[0]).toEqual({ type: 'tool_result', tool_use_id: 'tu_1', content: 'Opened node "slope"\'s thread. The lesson continues there.' })
+  expect(main[2].content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'tu_1' })
+  expect(main[2].content[0].content[0].text).toBe('Opened node "slope"\'s thread. The lesson continues there.')
   const slope = t.rows('slope')
   expect(slope.map(r => r.role)).toEqual(['user', 'assistant'])
   expect(slope[0].content[0].text).toBe('[App: focus_node opened this thread. Continue the lesson for "SLOPE" here.]')
   expect(slope[0].content[1].text).toContain('Thread: node slope')
   // The second request is the slope thread alone.
-  expect(t.calls[1].messages).toHaveLength(1)
-  expect(JSON.stringify(t.calls[1].messages)).not.toContain('tu_1')
+  expect(t.calls[1]).toHaveLength(1)
+  expect(JSON.stringify(t.calls[1])).not.toContain('tu_1')
   expect((await t.get()).focusNodeId).toBe('slope')
   expect(await t.thread('slope')).toMatchObject([{ type: 'assistant', text: 'Why slope?' }])
 })

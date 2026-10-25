@@ -34,22 +34,16 @@ beforeEach(() => {
 })
 
 async function setup(markdown = '# Converted') {
-  const calls: { html: string; apiKey: string }[] = []
+  const calls: { html: string }[] = []
   const app = buildApp({
     db: openDb(':memory:'),
-    htmlToMarkdown: async (html, apiKey) => {
-      calls.push({ html, apiKey })
+    htmlToMarkdown: async html => {
+      calls.push({ html })
       return markdown
     },
   })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
-  const importUrl = (url: string, key: string | null = 'sk-test') =>
-    app.inject({
-      method: 'POST',
-      url: `/api/projects/${project.id}/urls`,
-      headers: key ? { 'x-anthropic-key': key } : {},
-      payload: { url },
-    })
+  const importUrl = (url: string) => app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, payload: { url } })
   const content = async (id: string) => (await app.inject(`/api/files/${id}/content`)).body
   const fileCount = async () => (await app.inject(`/api/projects/${project.id}`)).json().files.length
   return { app, calls, importUrl, content, fileCount, projectId: project.id as string }
@@ -62,7 +56,6 @@ test('imports an HTML page through the converter', async () => {
   expect(res.json()).toMatchObject({ kind: 'url', name: `${base}/page`, url: `${base}/page` })
   expect(await content(res.json().id)).toBe('# Converted')
   expect(calls).toHaveLength(1)
-  expect(calls[0].apiKey).toBe('sk-test')
   expect(calls[0].html).toContain('<h1>Derivatives</h1>')
   expect(calls[0].html).not.toMatch(/<script|<style|<!--/)
 })
@@ -97,22 +90,13 @@ test('rejects a non-http URL', async () => {
   expect(res.statusCode).toBe(400)
 })
 
-test('requires an API key', async () => {
-  const { importUrl, calls } = await setup()
-  const res = await importUrl(`${base}/page`, null)
-  expect(res.statusCode).toBe(401)
-  expect(res.json().message).toBe('Add your Anthropic API key in settings.')
-  expect(calls).toHaveLength(0)
-})
-
 test('refresh re-imports the page', async () => {
   let markdown = '# Old'
   const app = buildApp({ db: openDb(':memory:'), htmlToMarkdown: async () => markdown })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
-  const headers = { 'x-anthropic-key': 'sk-test' }
-  const file = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, headers, payload: { url: `${base}/page` } })).json()
+  const file = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, payload: { url: `${base}/page` } })).json()
   markdown = '# New'
-  const res = await app.inject({ method: 'POST', url: `/api/files/${file.id}/refresh`, headers })
+  const res = await app.inject({ method: 'POST', url: `/api/files/${file.id}/refresh` })
   expect(res.statusCode).toBe(200)
   expect(res.json().id).toBe(file.id)
   expect((await app.inject(`/api/files/${file.id}/content`)).body).toBe('# New')
@@ -128,7 +112,7 @@ test('refusing to refresh an uploaded file', async () => {
       payload: Buffer.from('hi'),
     })
   ).json()
-  const res = await app.inject({ method: 'POST', url: `/api/files/${file.id}/refresh`, headers: { 'x-anthropic-key': 'sk-test' } })
+  const res = await app.inject({ method: 'POST', url: `/api/files/${file.id}/refresh`, })
   expect(res.statusCode).toBe(400)
   expect(res.json().message).toBe('Only imported URLs can be refreshed.')
 })
@@ -150,14 +134,14 @@ test('rejects a page whose declared size is over the project limit', async () =>
 test('URL imports record side-call usage on the project, not on any study', async () => {
   const app = buildApp({
     db: openDb(':memory:'),
-    htmlToMarkdown: async (_html, _key, onUsage) => {
-      onUsage?.({ model: 'claude-haiku-5-5', usage: { input_tokens: 40, output_tokens: 9 } as never })
+    htmlToMarkdown: async (_html, onUsage) => {
+      onUsage?.({ model: 'claude-haiku-5-5', inputTokens: 40, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0, webSearches: 0 })
       return '# Converted'
     },
   })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
-  await app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, headers: { 'x-anthropic-key': 'sk-test' }, payload: { url: `${base}/page` } })
+  await app.inject({ method: 'POST', url: `/api/projects/${project.id}/urls`, payload: { url: `${base}/page` } })
   const after = (await app.inject(`/api/projects/${project.id}`)).json()
   expect(after.usage).toEqual([{ model: 'claude-haiku-5-5', inputTokens: 40, outputTokens: 9, cacheReadTokens: 0, cacheWriteTokens: 0, webSearches: 0 }])
   expect(after.studies.find((s: { id: string }) => s.id === study.id).usage).toEqual([])

@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
 import { api, type FileInfo, type Project, uploadAll } from '../lib/api'
-import { useApp } from '../lib/app'
 import { fileBadge, formatBytes, usedLabel } from '../lib/format'
 import { ConfirmDialog } from './Dialog'
 
@@ -8,7 +7,6 @@ const ACCEPT = '.pdf,.md,.txt,image/png,image/jpeg,image/gif,image/webp'
 
 /** The project's files. The whole box takes dropped files; links need a key because pages are converted by Claude. */
 export function Files({ project, onChange }: { project: Project; onChange(): void }) {
-  const app = useApp()
   const [errors, setErrors] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const [linking, setLinking] = useState(false)
@@ -34,7 +32,6 @@ export function Files({ project, onChange }: { project: Project; onChange(): voi
 
   const addLink = () =>
     url.trim() &&
-    app.requireKey() &&
     run('link', async () => {
       await api(`/api/projects/${project.id}/urls`, { method: 'POST', json: { url: url.trim() } })
       setUrl('')
@@ -43,7 +40,6 @@ export function Files({ project, onChange }: { project: Project; onChange(): voi
     })
 
   const refresh = (f: FileInfo) =>
-    app.requireKey() &&
     run(f.id, () =>
       api(`/api/files/${f.id}/refresh`, { method: 'POST' }).then(
         () => [],

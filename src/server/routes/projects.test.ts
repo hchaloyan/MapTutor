@@ -42,6 +42,18 @@ test('deleting a project removes it', async () => {
   expect((await app.inject(`/api/projects/${p.id}`)).statusCode).toBe(404)
 })
 
+test('deleting a project removes its goals\' transcripts', async () => {
+  const { app, db } = setup()
+  const p = await createProject(app, 'Calculus')
+  const s = (await app.inject({ method: 'POST', url: `/api/projects/${p.id}/studies`, payload: { goal: 'midterm' } })).json()
+  db.prepare("UPDATE studies SET session_id = 'main-session' WHERE id = ?").run(s.id)
+  db.prepare("INSERT INTO nodes (id, study_id, label, kind, description, state, session_id, updated_at) VALUES ('n1', ?, 'n', 'derived', 'd', 'known', 'node-session', 0)").run(s.id)
+  const entry = db.prepare('INSERT INTO agent_entries (session_id, entry) VALUES (?, ?)')
+  for (const id of ['main-session', 'node-session', 'other-session']) entry.run(id, '{"type":"user"}')
+  expect((await app.inject({ method: 'DELETE', url: `/api/projects/${p.id}` })).statusCode).toBe(204)
+  expect(db.prepare('SELECT session_id FROM agent_entries').all()).toEqual([{ session_id: 'other-session' }])
+})
+
 test('creates a study in probe phase with zero counts', async () => {
   const { app } = setup()
   const p = await createProject(app, 'Calculus')

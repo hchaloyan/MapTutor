@@ -38,7 +38,8 @@ test('start is ignored while a turn runs, and errors end it', () => {
   expect(run({ type: 'start', now: 1 }, ev('error', { message: 'boom' }), ev('done')).error).toBe('boom')
 })
 
-test('a rejected key gets the API key link', () => {
-  expect(errorView('Your Anthropic API key was rejected.')).toEqual({ text: '⚠ Your Anthropic API key was rejected. Check it under', keyLink: true })
-  expect(errorView('The reply was too long and got cut off.')).toEqual({ text: '⚠ The reply was too long and got cut off.', keyLink: false })
+test('every error reads as one plain line', () => {
+  const signedOut = "Claude isn't signed in. Run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN, and restart the server."
+  expect(errorView(signedOut)).toEqual({ text: `⚠ ${signedOut}` })
+  expect(errorView('The reply was too long and got cut off.')).toEqual({ text: '⚠ The reply was too long and got cut off.' })
 })

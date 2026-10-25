@@ -1,6 +1,8 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
-import { type OnUsage, recordUsage } from '../core/usage'
+import { z } from 'zod'
+import { recordUsage } from '../core/usage'
+import type { UsageRow } from './engine'
 import { isAppText } from './context'
 import { checkSetState, type NodeKind, type NodeState } from './graph'
 import type { ServerTool } from './tools'
@@ -30,7 +32,7 @@ export const focusNodeTool: ServerTool = {
     name: 'focus_node',
     description:
       "Open a node's thread and continue the lesson there. Call it before teaching a node. Each node has its own thread, which sees only its own history plus the study state. The app highlights the node for the user.",
-    input_schema: { type: 'object', properties: { nodeId: { type: 'string' } }, required: ['nodeId'] },
+    shape: { nodeId: z.string() },
   },
   phases: ['teach', 'done'],
   run(input, { db, studyId, nodeId }) {
@@ -59,15 +61,7 @@ export const setNodeStateTool: ServerTool = {
     name: 'set_node_state',
     description:
       "Adjust a node's state when the conversation shows something the quiz-checks didn't, for example a gap that came up mid-lesson (frontier). Quiz-checks already set states, so most nodes never need this. Known needs a passed quiz-check on the node that is newer than its last failure. A node that was ever known can't go back to missed; use frontier.",
-    input_schema: {
-      type: 'object',
-      properties: {
-        nodeId: { type: 'string' },
-        state: { type: 'string', enum: ['missed', 'frontier', 'known'] },
-        reason: { type: 'string', description: 'What the conversation showed.' },
-      },
-      required: ['nodeId', 'state', 'reason'],
-    },
+    shape: { nodeId: z.string(), state: z.enum(['missed', 'frontier', 'known']), reason: z.string().describe('What the conversation showed.') },
   },
   phases: ['teach', 'done'],
   run(input, { db, studyId }) {
@@ -92,7 +86,7 @@ export const setNodeStateTool: ServerTool = {
   },
 }
 
-export type Summarize = (transcript: string, apiKey: string, onUsage?: OnUsage) => Promise<string>
+export type Summarize = (transcript: string, onUsage?: (u: UsageRow) => void) => Promise<string>
 
 /** The node, what it builds on, and the user and tutor text of its thread. Empty when the thread has no text. */
 function transcript(db: DatabaseSync, studyId: string, node: { id: string; label: string; description: string }) {
@@ -114,7 +108,7 @@ function transcript(db: DatabaseSync, studyId: string, node: { id: string; label
 }
 
 /** One side call per node that has been known, has no summary yet, and has a thread to summarize. */
-export async function summarizeNew(db: DatabaseSync, studyId: string, apiKey: string, summarize: Summarize) {
+export async function summarizeNew(db: DatabaseSync, studyId: string, summarize: Summarize) {
   const nodes = db
     .prepare('SELECT id, label, description FROM nodes WHERE study_id = ? AND ever_known = 1 AND summary IS NULL ORDER BY rowid')
     .all(studyId) as { id: string; label: string; description: string }[]
@@ -122,7 +116,7 @@ export async function summarizeNew(db: DatabaseSync, studyId: string, apiKey: st
   for (const node of nodes) {
     const text = transcript(db, studyId, node)
     if (!text) continue
-    const summary = (await summarize(text, apiKey, billed => recordUsage(db, projectId, studyId, billed))).trim()
+    const summary = (await summarize(text, u => recordUsage(db, projectId, studyId, u))).trim()
     if (summary) db.prepare('UPDATE nodes SET summary = ? WHERE study_id = ? AND id = ? AND summary IS NULL').run(summary, studyId, node.id)
   }
 }

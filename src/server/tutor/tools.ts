@@ -1,16 +1,18 @@
-import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
+import { z, type ZodRawShape } from 'zod'
 import { proposeGraphTool } from './plan'
 import { quizTool } from './quiz'
 import { focusNodeTool, setNodeStateTool } from './teach'
 
 export type Phase = 'probe' | 'plan' | 'teach' | 'done'
 export type ToolCtx = { db: DatabaseSync; studyId: string; nodeId: string | null }
+/** `shape` is the input schema the tutor server publishes. */
+export type ToolDef = { name: string; description: string; shape: ZodRawShape }
 
 /** Renders a card and pauses the loop until the user answers. */
 export type ClientTool = {
   kind: 'client'
-  def: Anthropic.Beta.BetaTool
+  def: ToolDef
   phases: Phase[]
   /** Error message for the tutor when the input is unusable, else null. */
   check(input: unknown, ctx: ToolCtx): string | null
@@ -24,7 +26,7 @@ export type ClientTool = {
 /** Runs immediately on the server. */
 export type ServerTool = {
   kind: 'server'
-  def: Anthropic.Beta.BetaTool
+  def: ToolDef
   phases: Phase[]
   /** `switchTo` moves the rest of the turn into that node's thread, opened with `note`. */
   run(input: unknown, ctx: ToolCtx): { content: string; isError?: boolean; switchTo?: { nodeId: string; note: string } }
@@ -44,23 +46,10 @@ const askUserQuestion: ClientTool = {
     name: 'ask_user_question',
     description:
       'Ask the user a question that has no right answer: their goal, a preference, or what to do next. Renders a card with 2–4 options; the app always adds an "Other" choice where the user types their own answer. Returns { answers: string[] }: the chosen labels, or the text the user typed.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        question: { type: 'string' },
-        options: {
-          type: 'array',
-          minItems: 2,
-          maxItems: 4,
-          items: {
-            type: 'object',
-            properties: { label: { type: 'string' }, description: { type: 'string' } },
-            required: ['label'],
-          },
-        },
-        multiSelect: { type: 'boolean', description: 'Allow choosing more than one option.' },
-      },
-      required: ['question', 'options'],
+    shape: {
+      question: z.string(),
+      options: z.array(z.object({ label: z.string(), description: z.string().optional() })).min(2).max(4),
+      multiSelect: z.boolean().describe('Allow choosing more than one option.').optional(),
     },
   },
   phases: ALL_PHASES,
@@ -91,7 +80,7 @@ const setGoalTitle: ServerTool = {
   def: {
     name: 'set_goal_title',
     description: "Name the goal once it is concrete: a short title of about 2–6 words. The app shows it as the goal's name.",
-    input_schema: { type: 'object', properties: { title: { type: 'string', maxLength: 80 } }, required: ['title'] },
+    shape: { title: z.string().max(80) },
   },
   phases: ['probe', 'plan'],
   run(input, { db, studyId }) {
@@ -105,5 +94,5 @@ const setGoalTitle: ServerTool = {
 
 export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool, focusNodeTool, setNodeStateTool, setGoalTitle]
 
-/** Anthropic's server tools are always available; context.ts declares them. */
-export const allowedTools = (phase: Phase) => [...TOOLS.filter(t => t.phases.includes(phase)).map(t => t.def.name), 'web_search']
+/** Claude Code's WebSearch is always available. */
+export const allowedTools = (phase: Phase) => [...TOOLS.filter(t => t.phases.includes(phase)).map(t => t.def.name), 'WebSearch']

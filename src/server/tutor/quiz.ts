@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { z } from 'zod'
 import { afterQuizCheck, type NodeState } from './graph'
 import { setNodeState } from './teach'
 import type { ClientTool, Phase, ToolCtx } from './tools'
@@ -62,34 +63,21 @@ export const quizTool: ClientTool = {
       'During the probe (and plan), every item needs `strand`: a short topic tag, reused exactly for every question on that topic. During teaching, every item needs `nodeId`: the node it checks.',
       'Write math in LaTeX: $…$ inline, $$…$$ for display.',
     ].join('\n\n'),
-    input_schema: {
-      type: 'object',
-      properties: {
-        items: {
-          type: 'array',
-          minItems: 1,
-          maxItems: 10,
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              prompt: { type: 'string', description: 'Markdown + LaTeX.' },
-              options: {
-                type: 'array',
-                minItems: 2,
-                maxItems: 6,
-                items: { type: 'object', properties: { id: { type: 'string' }, text: { type: 'string' } }, required: ['id', 'text'] },
-              },
-              correctOptionId: { type: 'string' },
-              explanation: { type: 'string', description: 'Shown only after the user answers. All reasoning goes here, never in options.' },
-              strand: { type: 'string', description: 'Required during the probe.' },
-              nodeId: { type: 'string', description: 'Required during a quiz-check.' },
-            },
-            required: ['id', 'prompt', 'options', 'correctOptionId', 'explanation'],
-          },
-        },
-      },
-      required: ['items'],
+    shape: {
+      items: z
+        .array(
+          z.object({
+            id: z.string(),
+            prompt: z.string().describe('Markdown + LaTeX.'),
+            options: z.array(z.object({ id: z.string(), text: z.string() })).min(2).max(6),
+            correctOptionId: z.string(),
+            explanation: z.string().describe('Shown only after the user answers. All reasoning goes here, never in options.'),
+            strand: z.string().describe('Required during the probe.').optional(),
+            nodeId: z.string().describe('Required during a quiz-check.').optional(),
+          }),
+        )
+        .min(1)
+        .max(10),
     },
   },
   phases: ['probe', 'plan', 'teach', 'done'],

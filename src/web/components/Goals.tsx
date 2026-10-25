@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { api, type StudySummary } from '../lib/api'
-import { useApp } from '../lib/app'
 import { goalName, phaseLabel } from '../lib/format'
 import { navigate } from '../lib/router'
 import { ConfirmDialog } from './Dialog'
@@ -8,13 +7,12 @@ import { MasteryBar } from './MasteryBar'
 
 /** Starting a goal opens it; the goal screen sends the typed text as the first message. */
 export function NewGoal({ projectId }: { projectId: string }) {
-  const app = useApp()
   const [goal, setGoal] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   async function start() {
     const text = goal.trim()
-    if (!text || !app.requireKey()) return
+    if (!text) return
     try {
       const study = await api<StudySummary>(`/api/projects/${projectId}/studies`, { method: 'POST', json: { goal: text } })
       navigate(`/goals/${study.id}`, { firstMessage: text })

@@ -13,7 +13,7 @@ function seedProject(db: ReturnType<typeof openDb>) {
 test('creates every table without quiz_items.hint or studies.search_cap', () => {
   const db = openDb(':memory:')
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(r => r.name)
-  expect(tables).toEqual(['edges', 'files', 'messages', 'nodes', 'projects', 'quiz_items', 'studies', 'usage', 'users'])
+  expect(tables).toEqual(['agent_entries', 'edges', 'files', 'messages', 'nodes', 'projects', 'quiz_items', 'studies', 'usage', 'users'])
   expect(db.prepare('PRAGMA table_info(quiz_items)').all().map(c => c.name)).not.toContain('hint')
   expect(db.prepare('PRAGMA table_info(studies)').all().map(c => c.name)).not.toContain('search_cap')
 })

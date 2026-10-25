@@ -13,7 +13,6 @@ import { StrandPanel } from '../components/StrandPanel'
 import { TopBar } from '../components/TopBar'
 import { UsageButton } from '../components/Usage'
 import { api, type Card, type NodeState, type Phase, type Project, type Study, type ThreadItem } from '../lib/api'
-import { useApp } from '../lib/app'
 import { goalName, STATES } from '../lib/format'
 import { prereqText } from '../lib/graph'
 import { navigate } from '../lib/router'
@@ -23,7 +22,6 @@ import { idleTurn, turnReducer } from '../lib/turn'
 const threadQuery = (id: string | null) => (id ? `?nodeId=${encodeURIComponent(id)}` : '')
 
 export function Goal({ goalId }: { goalId: string }) {
-  const app = useApp()
   const [study, setStudy] = useState<Study | null>(null)
   const [projectName, setProjectName] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -91,7 +89,6 @@ export function Goal({ goalId }: { goalId: string }) {
             awaiting = e.data.awaiting
             ended = true
           }
-          if (e.event === 'error' && e.data.message === 'Your Anthropic API key was rejected.') app.setKeyStatus('rejected')
         })
         // A 204 (e.g. `open` on a thread that has history by now) sends no `done`; end the turn so it refetches.
         if (!ended) dispatch({ type: 'event', event: 'done', data: { awaiting: false }, now: Date.now() })
@@ -100,12 +97,12 @@ export function Goal({ goalId }: { goalId: string }) {
       }
       return awaiting
     },
-    [goalId, app],
+    [goalId],
   )
 
   const send = useCallback(
     async (text: string) => {
-      if (!text.trim() || !app.requireKey()) return
+      if (!text.trim()) return
       if (busy.current) {
         setQueued(text)
         setDraft('')
@@ -123,7 +120,7 @@ export function Goal({ goalId }: { goalId: string }) {
         else send(next)
       }
     },
-    [app, runTurn],
+    [runTurn],
   )
 
   const sendRef = useRef(send)
@@ -132,12 +129,12 @@ export function Goal({ goalId }: { goalId: string }) {
   /** Retry and card answers: turns that add no visible user message. */
   const resume = useCallback(
     async (path: string, json: object) => {
-      if (busy.current || !app.requireKey()) return
+      if (busy.current) return
       busy.current = true
       await runTurn(path, json)
       busy.current = false
     },
-    [app, runTurn],
+    [runTurn],
   )
 
   /** Shows a node's thread; an empty one starts its lesson unless a turn is running. */
@@ -280,7 +277,6 @@ export function Goal({ goalId }: { goalId: string }) {
               onSend={() => send(draft)}
               onStop={() => api(`/api/studies/${goalId}/stop`, { method: 'POST' }).catch(() => {})}
               onRetry={() => resume('retry', threadId ? { nodeId: threadId } : {})}
-              onKeyLink={() => app.setKeyPanelOpen(true)}
               renderCard={(card: Card) => {
                 const props = { card, disabled: turn.running, onAnswer: (answer: unknown) => resume('tool-results', { toolUseId: card.toolUseId, answer }) }
                 return card.name === 'quiz' ? <QuizCard {...props} /> : card.name === 'propose_graph' ? <PlanCard {...props} /> : <QuestionCard {...props} />

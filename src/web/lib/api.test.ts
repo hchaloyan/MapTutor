@@ -24,13 +24,13 @@ afterEach(() => vi.unstubAllGlobals())
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-test('api sends the saved key and maps server errors', async () => {
+test('api maps server errors and never sends a key, even one saved before', async () => {
   localStorage.setItem('maptutor.key', 'sk-ant-mine')
   respond(json(409, { statusCode: 409, error: 'Conflict', message: 'The tutor is still replying.' }))
   const err = (await api('/api/studies/s1', { method: 'DELETE' }).catch(e => e)) as ApiError
   expect(err).toBeInstanceOf(ApiError)
   expect([err.status, err.message]).toEqual([409, 'The tutor is still replying.'])
-  expect(new Headers(requests[0].init.headers).get('x-anthropic-key')).toBe('sk-ant-mine')
+  expect(new Headers(requests[0].init.headers).has('x-anthropic-key')).toBe(false)
 })
 
 test('api sends JSON and returns undefined for 204', async () => {

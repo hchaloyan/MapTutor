@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS studies (
   phase       TEXT NOT NULL CHECK (phase IN ('probe','plan','teach','done')),
   approach    TEXT,                      -- prose plan from the approved propose_graph
   focus_node_id TEXT,                    -- the node being taught; set by focus_node or by opening its thread
+  session_id  TEXT,                      -- Agent SDK session of the main thread; NULL until its first hop
   created_at  INTEGER NOT NULL
 );
 
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   state       TEXT NOT NULL CHECK (state IN ('untested','missed','frontier','known')),
   ever_known  INTEGER NOT NULL DEFAULT 0,   -- set once, never cleared
   summary     TEXT,                         -- written when first Known
+  session_id  TEXT,                         -- Agent SDK session of this node's thread; NULL until its first hop
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (study_id, id)
 );
@@ -84,13 +86,13 @@ CREATE TABLE IF NOT EXISTS messages (
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
   node_id     TEXT,                       -- NULL = main probe/plan thread
   role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
-  content     TEXT NOT NULL,              -- JSON content blocks, as sent to and received from the API
+  content     TEXT NOT NULL,              -- JSON content blocks, mirrored from the thread's Agent SDK session for display
   pending     INTEGER NOT NULL DEFAULT 0, -- 1 = assistant tool_use awaiting a user response
   created_at  INTEGER NOT NULL,
   FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
--- One row per model call, including side calls. study_id is NULL for project-level calls (URL import).
+-- One row per model per hop, and per side call. study_id is NULL for project-level calls (URL import).
 CREATE TABLE IF NOT EXISTS usage (
   id                 INTEGER PRIMARY KEY,
   project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -102,6 +104,16 @@ CREATE TABLE IF NOT EXISTS usage (
   cache_write_tokens INTEGER NOT NULL,
   web_searches       INTEGER NOT NULL,
   created_at         INTEGER NOT NULL
+);
+
+-- Agent SDK session transcripts (SessionStore), one row per entry in append order.
+CREATE TABLE IF NOT EXISTS agent_entries (
+  seq        INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  subpath    TEXT NOT NULL DEFAULT '',
+  uuid       TEXT,
+  entry      TEXT NOT NULL,
+  UNIQUE (session_id, subpath, uuid)
 );
 
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(study_id, node_id, created_at);

@@ -1,5 +1,4 @@
 import { ApiError } from './api'
-import { getKey } from './key'
 
 export type SseEvent = { event: string; data: any }
 
@@ -18,10 +17,7 @@ export function parseSse(buffer: string): { events: SseEvent[]; rest: string } {
 
 /** Posts to a turn route and feeds its events to `onEvent` until `done`. A 204 (nothing to run) resolves at once. */
 export async function postStream(path: string, json: unknown, onEvent: (e: SseEvent) => void): Promise<void> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' }
-  const key = getKey()
-  if (key) headers['x-anthropic-key'] = key
-  const res = await fetch(path, { method: 'POST', headers, body: JSON.stringify(json) })
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(json) })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
     throw new ApiError(res.status, body.message ?? 'Something went wrong.')

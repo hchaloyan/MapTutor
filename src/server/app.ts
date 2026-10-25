@@ -1,40 +1,40 @@
 import Fastify from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, apiKey, type CheckKey, checkKey, htmlToMarkdown, streamMessage, summarize } from './core/anthropic'
+import { agentEngine, AgentError, htmlToMarkdown, mcpRoutes, summarize } from './core/agent'
+import { httpError } from './core/http'
 import { fileRoutes, type HtmlToMarkdown } from './routes/files'
 import { projectRoutes } from './routes/projects'
 import { studyRoutes } from './routes/studies'
-import type { StreamMessage } from './tutor/loop'
+import type { RunHop } from './tutor/engine'
 import type { Summarize } from './tutor/teach'
 
 export function buildApp(opts: {
   db: DatabaseSync
   logStream?: { write(line: string): void }
-  htmlToMarkdown?: HtmlToMarkdown
-  streamMessage?: StreamMessage
+  runHop?: RunHop
   summarize?: Summarize
-  checkKey?: CheckKey
+  htmlToMarkdown?: HtmlToMarkdown
 }) {
   const { db, logStream } = opts
-  const app = Fastify({
-    logger: logStream ? { stream: logStream, redact: ['req.headers["x-anthropic-key"]'] } : false,
-  })
+  const app = Fastify({ logger: logStream ? { stream: logStream } : false })
 
-  app.setErrorHandler((err, _req, reply) => reply.send(anthropicError(err) ?? err))
+  app.setErrorHandler((err, _req, reply) => reply.send(err instanceof AgentError ? httpError(502, err.message) : err))
 
   app.get('/api/health', async () => {
     db.prepare('SELECT 1').get()
     return { ok: true }
   })
 
-  app.post('/api/key/check', async (req, reply) => {
-    await (opts.checkKey ?? checkKey)(apiKey(req))
-    return reply.code(204).send()
-  })
+  // The tutor's tools reach Claude Code through this server, at the address it listens on.
+  mcpRoutes(app)
+  const self = () => {
+    const { address, port } = app.addresses()[0]
+    return `http://${address}:${port}`
+  }
 
   projectRoutes(app, db)
   fileRoutes(app, { db, htmlToMarkdown: opts.htmlToMarkdown ?? htmlToMarkdown })
-  studyRoutes(app, { db, streamMessage: opts.streamMessage ?? streamMessage, summarize: opts.summarize ?? summarize })
+  studyRoutes(app, { db, runHop: opts.runHop ?? agentEngine(db, self), summarize: opts.summarize ?? summarize })
 
   return app
 }

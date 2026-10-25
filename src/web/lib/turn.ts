@@ -62,8 +62,4 @@ export function turnReducer(t: Turn, a: TurnAction): Turn {
 /** What to draw after the thread: streamed texts, and an empty last one as the waiting card while running. */
 export const liveSegments = (t: Turn) => t.segments.filter((s, i) => s || (t.running && i === t.segments.length - 1))
 
-export function errorView(message: string) {
-  return message === 'Your Anthropic API key was rejected.'
-    ? { text: '⚠ Your Anthropic API key was rejected. Check it under', keyLink: true }
-    : { text: `⚠ ${message}`, keyLink: false }
-}
+export const errorView = (message: string) => ({ text: `⚠ ${message}` })

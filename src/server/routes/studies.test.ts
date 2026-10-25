@@ -1,32 +1,21 @@
-import Anthropic from '@anthropic-ai/sdk'
+import type Anthropic from '@anthropic-ai/sdk'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app'
+import { AgentError } from '../core/agent'
 import { openDb } from '../core/db'
-import type { StreamMessage } from '../tutor/loop'
+import { type Reply, scripted, text, texts } from '../tutor/scripted'
 
-type Reply = { content: unknown[]; stop_reason: string }
-const text = (t: string): Reply => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' })
 const QUESTION = { question: 'What is the goal?', options: [{ label: 'Pass the midterm' }, { label: 'Understand it' }] }
 const ask = (id = 'tu_1'): Reply => ({ content: [{ type: 'tool_use', id, name: 'ask_user_question', input: QUESTION }], stop_reason: 'tool_use' })
-const KEY = { 'x-anthropic-key': 'sk-test' }
+const LIMIT = "You've hit your Claude plan's usage limit. Try again when it resets."
 
-type Opts = Parameters<StreamMessage>[3]
-
-async function setup(script: (Reply | ((opts: Opts) => Promise<Reply>))[]) {
-  const calls: Parameters<StreamMessage>[0][] = []
-  const streamMessage: StreamMessage = async (params, _key, onText, opts) => {
-    calls.push(structuredClone(params))
-    const next = script.shift()!
-    const reply = typeof next === 'function' ? await next(opts) : next
-    for (const b of reply.content as { type: string; text?: string }[]) if (b.type === 'text') onText(b.text!)
-    return reply as unknown as Anthropic.Beta.BetaMessage
-  }
+async function setup(script: Parameters<typeof scripted>[0]) {
+  const { calls, runHop } = scripted(script)
   const db = openDb(':memory:')
-  const app = buildApp({ db, streamMessage })
+  const app = buildApp({ db, runHop })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
-  const send = (body: object, url = `/api/studies/${study.id}/messages`, headers: Record<string, string> = KEY) =>
-    app.inject({ method: 'POST', url, headers, payload: body })
+  const send = (body: object, url = `/api/studies/${study.id}/messages`) => app.inject({ method: 'POST', url, payload: body })
   const answer = (toolUseId: string, answer: unknown) => send({ toolUseId, answer }, `/api/studies/${study.id}/tool-results`)
   const thread = async () => (await app.inject(`/api/studies/${study.id}/thread`)).json()
   return { app, db, calls, projectId: project.id as string, studyId: study.id as string, send, answer, thread }
@@ -105,13 +94,15 @@ test('an unknown toolUseId is a 404 and a bad answer is a 400', async () => {
   expect(bad.json().message).toBe('Pick an option or write your own answer.')
 })
 
-test('a rejected key mid-turn streams an error, then done', async () => {
+test('an engine error mid-turn streams its message, then done', async () => {
   const t = await setup([
-    () => Promise.reject(new Anthropic.AuthenticationError(401, { type: 'error' }, 'invalid x-api-key', new Headers())),
+    () => {
+      throw new AgentError(LIMIT)
+    },
     text('back'),
   ])
   expect(events((await t.send({ text: 'help' })).payload)).toEqual([
-    { event: 'error', data: { message: 'Your Anthropic API key was rejected.' } },
+    { event: 'error', data: { message: LIMIT } },
     { event: 'done', data: { awaiting: false } },
   ])
   // The message stayed stored, so the next one goes through.
@@ -119,10 +110,8 @@ test('a rejected key mid-turn streams an error, then done', async () => {
   expect((await t.thread()).filter((i: { type: string }) => i.type === 'user')).toHaveLength(2)
 })
 
-test('requires a key and a known study', async () => {
+test('an unknown study is a 404', async () => {
   const t = await setup([])
-  const noKey = await t.send({ text: 'help' }, undefined, {})
-  expect(noKey.statusCode).toBe(401)
   const unknown = await t.send({ text: 'help' }, '/api/studies/nope/messages')
   expect(unknown.statusCode).toBe(404)
   expect(unknown.json().message).toBe('Study not found.')
@@ -140,14 +129,14 @@ const setTitle = (title: unknown, id = 'tu_t'): Reply => ({
   stop_reason: 'tool_use',
 })
 /** The tool_result block the tutor got back in the given call. */
-const lastToolResult = (call: Parameters<StreamMessage>[0]) =>
-  (call.messages.at(-1)!.content as { type: string }[]).find(b => b.type === 'tool_result')
+const lastToolResult = (call: Anthropic.Beta.BetaMessageParam[]) =>
+  (call.at(-1)!.content as { type: string; content: unknown; is_error?: boolean }[]).find(b => b.type === 'tool_result')!
 
 test('set_goal_title stores a short title that the study endpoints return', async () => {
   const t = await setup([setTitle('  Ace the midterm '), text('Titled.')])
   expect((await t.app.inject(`/api/studies/${t.studyId}`)).json().title).toBeNull()
   await t.send({ text: 'help' })
-  expect(lastToolResult(t.calls[1])).toMatchObject({ content: 'Goal title set to "Ace the midterm".' })
+  expect(texts(lastToolResult(t.calls[1]).content)[0]).toBe('Goal title set to "Ace the midterm".')
   expect((await t.app.inject(`/api/studies/${t.studyId}`)).json().title).toBe('Ace the midterm')
   expect((await t.app.inject(`/api/projects/${t.projectId}`)).json().studies[0].title).toBe('Ace the midterm')
 })
@@ -156,7 +145,8 @@ test('set_goal_title rejects a blank or over-80-character title', async () => {
   const t = await setup([setTitle('   ', 'tu_1'), setTitle('x'.repeat(81), 'tu_2'), text('ok')])
   await t.send({ text: 'help' })
   for (const call of t.calls.slice(1)) {
-    expect(lastToolResult(call)).toMatchObject({ is_error: true, content: 'set_goal_title needs a title of 1–80 characters.' })
+    expect(lastToolResult(call).is_error).toBe(true)
+    expect(texts(lastToolResult(call).content)[0]).toBe('set_goal_title needs a title of 1–80 characters.')
   }
   expect((await t.app.inject(`/api/studies/${t.studyId}`)).json().title).toBeNull()
 })
@@ -204,10 +194,10 @@ test('stop is a 204 whether or not a turn is running', async () => {
   const running = new Promise<void>(resolve => (started = resolve))
   const t = await setup([
     // Waits for Stop, then rejects the way an aborted stream does.
-    opts =>
+    (_messages, opts) =>
       new Promise((_resolve, reject) => {
         started()
-        opts?.signal?.addEventListener('abort', () => reject(new Error('Request was aborted.')))
+        opts.signal?.addEventListener('abort', () => reject(new Error('Request was aborted.')))
       }),
   ])
   const stop = (id = t.studyId) => t.app.inject({ method: 'POST', url: `/api/studies/${id}/stop` })
@@ -221,7 +211,9 @@ test('stop is a 204 whether or not a turn is running', async () => {
 
 test('retry re-runs a failed turn without a new user message; otherwise it is a 409', async () => {
   const t = await setup([
-    () => Promise.reject(new Anthropic.AuthenticationError(401, { type: 'error' }, 'invalid x-api-key', new Headers())),
+    () => {
+      throw new AgentError(LIMIT)
+    },
     text('Recovered.'),
   ])
   const retry = (body: object = {}) => t.send(body, `/api/studies/${t.studyId}/retry`)
@@ -253,7 +245,7 @@ test('open starts the lesson in an empty node thread; with history it is a 204; 
     { event: 'text', data: { delta: 'Lesson one.' } },
     { event: 'done', data: { awaiting: false } },
   ])
-  const sent = t.calls[0].messages.at(-1)!.content as { type: string; text: string }[]
+  const sent = t.calls[0].at(-1)!.content as { type: string; text: string }[]
   expect(sent[0]).toEqual({ type: 'text', text: '[App: The user opened "Limits". Teach it now.]' })
   expect(sent.at(-1)!.text).toMatch(/^<study_state>[\s\S]*Thread: node n1/)
   expect((await t.app.inject(`/api/studies/${t.studyId}`)).json().focusNodeId).toBe('n1')
@@ -281,4 +273,39 @@ test('retry, open, and messages are 409 while a turn runs', async () => {
   h.release()
   expect(events((await turn).payload).filter(e => e.event === 'done')).toHaveLength(1)
   expect(t.calls).toHaveLength(1)
+})
+
+const QUIZ = { items: [{ id: 'q1', strand: 'limits', prompt: 'P?', options: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], correctOptionId: 'b', explanation: 'E.' }] }
+
+test('retry after a failed answer resumes the card call without re-grading', async () => {
+  const t = await setup([
+    { content: [{ type: 'tool_use', id: 'tu_q', name: 'quiz', input: QUIZ }], stop_reason: 'tool_use' },
+    () => {
+      throw new AgentError(LIMIT)
+    },
+    text('Thanks.'),
+  ])
+  await t.send({ text: 'help' })
+  expect(events((await t.answer('tu_q', { choices: { q1: 'b' } })).payload)).toEqual([
+    { event: 'error', data: { message: LIMIT } },
+    { event: 'done', data: { awaiting: false } },
+  ])
+  const graded = t.db.prepare('SELECT id, chosen_option_id, answered_at FROM quiz_items').all()
+  expect(graded).toHaveLength(1)
+  expect(events((await t.send({}, `/api/studies/${t.studyId}/retry`)).payload).at(-1)).toEqual({ event: 'done', data: { awaiting: false } })
+  expect(t.db.prepare('SELECT id, chosen_option_id, answered_at FROM quiz_items').all()).toEqual(graded)
+  const seen = t.calls.at(-1)!.flatMap(m => (Array.isArray(m.content) ? m.content : [])) as { type: string; tool_use_id?: string }[]
+  expect(seen.filter(b => b.type === 'tool_result' && b.tool_use_id === 'tu_q')).toHaveLength(1)
+  expect((await t.thread()).at(-1)).toMatchObject({ type: 'assistant', text: 'Thanks.' })
+})
+
+test('deleting a goal removes its transcripts', async () => {
+  const t = await setup([text('Hi.')])
+  await t.send({ text: 'help' })
+  const { session_id } = t.db.prepare('SELECT session_id FROM studies WHERE id = ?').get(t.studyId) as { session_id: string }
+  const entry = t.db.prepare('INSERT INTO agent_entries (session_id, entry) VALUES (?, ?)')
+  entry.run(session_id, '{"type":"user"}')
+  entry.run('other-session', '{"type":"user"}')
+  expect((await t.app.inject({ method: 'DELETE', url: `/api/studies/${t.studyId}` })).statusCode).toBe(204)
+  expect(t.db.prepare('SELECT session_id FROM agent_entries').all()).toEqual([{ session_id: 'other-session' }])
 })

@@ -24,6 +24,7 @@ Backend first, then frontend. Each component ends with something that runs and h
 | 9 | Goal screen | Top bar with phase steps, draggable split, chat (Markdown + KaTeX, streaming, Stop, Retry, queued message), question / quiz / plan cards, strand panel | 3–5, 7b | Done: [plan](docs/superpowers/plans/2026-10-25-goal-screen.md) |
 | 10 | Graph view | React Flow + dagre, state colors, current-node pulse, legend, tooltip, prerequisite banner, thread switching | 6 | Done: [plan](docs/superpowers/plans/2026-10-25-map.md) |
 | 11 | Polish | Usage popover, goal-complete card and confetti, doc updates (Refresh moved to 8; the web-search cost note became the search count in the usage popover) | 7 | Done: [plan](docs/superpowers/plans/2026-10-25-polish.md) |
+| 12 | Agent SDK switch | The tutor runs on the Claude Agent SDK with the user's subscription: one session per thread, transcripts in SQLite, cards defer and resume, tools over MCP from this server; the key flow and Welcome screen removed | 3–11 | Done: [plan](docs/superpowers/plans/2026-10-25-agent-sdk.md) |
 
 ## Decisions
 
@@ -36,8 +37,9 @@ Backend first, then frontend. Each component ends with something that runs and h
 - **Tool names follow the skill:** `ask_goal` is now `ask_user_question` and is allowed in every phase, since the skill also uses it mid-lesson.
 - **Web search in every phase:** the skill says to verify any uncertain fact, including in probe questions.
 - **New nodes during Teach:** none. A new unconditional truth needed mid-lesson is taught inline in the current node's thread; no `add_node` tool (2026-10-24).
+- **Claude Agent SDK on the user's subscription** replaces the Messages API and BYOK: personal use only, no API key, no explicit cache control (2026-10-25).
 - **Visual design:** settled with the user in [the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md) (2026-10-25); its backend changes became component 7b.
 
 ## Open
 
-- **First live run:** every Claude call so far ran against the scripted fake tutor; the first run with a real key happens with the user.
+- **First live run:** done on 2026-10-25 (smoke run: files, cards, resume after a restart, plan approval, node threads, Stop, usage, web search). The tutor skipped the plan-phase scoping search unless asked; watch for it in real use.

@@ -4,7 +4,7 @@ The schema is SQLite-flavored. IDs are text UUIDs. JSON columns hold small struc
 
 ## Why
 
-The model keeps nothing between requests, so the database is the single source of truth for the graph, node states, and quiz evidence. Three schema choices follow from that:
+The model's conversation is not where state lives, so the database is the single source of truth for the graph, node states, and quiz evidence. Three schema choices follow from that:
 
 - **Per-node threads.** `messages.node_id` puts each node's conversation in its own thread, so a request can load one node's history without the others.
 - **Probe-to-node mapping.** `quiz_items.strand` and `nodes.strands` carry the link between probe questions and nodes.
@@ -43,6 +43,7 @@ CREATE TABLE studies (
   phase       TEXT NOT NULL CHECK (phase IN ('probe','plan','teach','done')),
   approach    TEXT,                      -- prose plan from the approved propose_graph
   focus_node_id TEXT,                    -- the node being taught; set by focus_node or by opening its thread
+  session_id  TEXT,                      -- Agent SDK session of the main thread; NULL until its first hop
   created_at  INTEGER NOT NULL
 );
 
@@ -56,6 +57,7 @@ CREATE TABLE nodes (
   state       TEXT NOT NULL CHECK (state IN ('untested','missed','frontier','known')),
   ever_known  INTEGER NOT NULL DEFAULT 0,   -- set once, never cleared
   summary     TEXT,                         -- written when first Known
+  session_id  TEXT,                         -- Agent SDK session of this node's thread; NULL until its first hop
   updated_at  INTEGER NOT NULL,
   PRIMARY KEY (study_id, id)
 );
@@ -90,13 +92,13 @@ CREATE TABLE messages (
   study_id    TEXT NOT NULL REFERENCES studies(id) ON DELETE CASCADE,
   node_id     TEXT,                       -- NULL = main probe/plan thread
   role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
-  content     TEXT NOT NULL,              -- JSON content blocks, as sent to and received from the API
+  content     TEXT NOT NULL,              -- JSON content blocks, mirrored from the thread's Agent SDK session for display
   pending     INTEGER NOT NULL DEFAULT 0, -- 1 = assistant tool_use awaiting a user response
   created_at  INTEGER NOT NULL,
   FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE
 );
 
--- One row per model call, including side calls. study_id is NULL for project-level calls (URL import).
+-- One row per model per hop, and per side call. study_id is NULL for project-level calls (URL import).
 CREATE TABLE usage (
   id                 INTEGER PRIMARY KEY,
   project_id         TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -110,6 +112,16 @@ CREATE TABLE usage (
   created_at         INTEGER NOT NULL
 );
 
+-- Agent SDK session transcripts (SessionStore), one row per entry in append order.
+CREATE TABLE agent_entries (
+  seq        INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  subpath    TEXT NOT NULL DEFAULT '',
+  uuid       TEXT,
+  entry      TEXT NOT NULL,             -- one JSON transcript entry
+  UNIQUE (session_id, subpath, uuid)
+);
+
 CREATE INDEX idx_messages_thread ON messages(study_id, node_id, created_at);
 CREATE INDEX idx_quiz_node ON quiz_items(study_id, node_id);
 ```
@@ -119,4 +131,5 @@ CREATE INDEX idx_quiz_node ON quiz_items(study_id, node_id);
 - **Node IDs** are short names the tutor picks (`limits`, `r1`), so they're unique only within a study. Every reference to a node carries `study_id` as well, through composite foreign keys.
 - **Replacing the graph.** When `propose_graph` is re-proposed during Plan, the app deletes the study's nodes and edges and inserts the new set. That's safe because no node threads exist before approval.
 - **Node evidence** is derived at read time, not stored: `SELECT … FROM quiz_items WHERE node_id = ? OR strand IN (node.strands)`.
-- **API keys** are never stored server-side (see [05-stack.md](05-stack.md#byok)).
+- **Sessions.** `studies.session_id` and `nodes.session_id` name each thread's Agent SDK session; `agent_entries` holds its transcript, keyed by session id only. `messages` is a display mirror; the model's context is the session. Deleting a goal deletes its transcripts.
+- **No API keys** anywhere: Claude Code signs in with a token from the server's environment (see [05-stack.md](05-stack.md#claude-sign-in)).

@@ -1,16 +1,14 @@
-import type Anthropic from '@anthropic-ai/sdk'
 import type { DatabaseSync } from 'node:sqlite'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app'
 import { LOCAL_USER_ID, openDb } from '../core/db'
 import { studyStateText } from './context'
-import type { StreamMessage } from './loop'
 import { loadGraph, proposeGraphTool } from './plan'
+import { scripted } from './scripted'
 
 type Reply = { content: unknown[]; stop_reason: string }
 const text = (t: string): Reply => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' })
 const propose = (input: unknown, id = 'tu_g'): Reply => ({ content: [{ type: 'tool_use', id, name: 'propose_graph', input }], stop_reason: 'tool_use' })
-const KEY = { 'x-anthropic-key': 'sk-test' }
 
 const node = (id: string, kind: string, strands: string[] = []) => ({ id, label: id.toUpperCase(), kind, description: `About ${id}.`, strands })
 const GRAPH = {
@@ -40,14 +38,13 @@ function setup(phase = 'probe') {
 
 async function setupApp(script: Reply[]) {
   const db = openDb(':memory:')
-  const streamMessage: StreamMessage = async () => script.shift() as unknown as Anthropic.Beta.BetaMessage
-  const app = buildApp({ db, streamMessage })
+  const app = buildApp({ db, runHop: scripted(script).runHop })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
   seedProbe(db, study.id)
-  const send = (body: object) => app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, headers: KEY, payload: body })
+  const send = (body: object) => app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, payload: body })
   const answer = (toolUseId: string, answer: unknown) =>
-    app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, headers: KEY, payload: { toolUseId, answer } })
+    app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, payload: { toolUseId, answer } })
   const get = async () => (await app.inject(`/api/studies/${study.id}`)).json()
   const lastUser = () =>
     JSON.parse(
@@ -139,7 +136,7 @@ test('propose_graph is rejected during teach', async () => {
   const t = await setupApp([propose(GRAPH), text('ok')])
   t.db.prepare("UPDATE studies SET phase = 'teach' WHERE id = ?").run(t.studyId)
   await t.send({ text: 'new plan' })
-  expect(t.lastUser()[0]).toMatchObject({ is_error: true, content: "`propose_graph` isn't available in the teach phase." })
+  expect(t.lastUser()[0]).toMatchObject({ is_error: true, content: [{ type: 'text', text: "`propose_graph` isn't available in the teach phase." }] })
   expect((await t.get()).nodes).toEqual([])
 })
 

@@ -3,6 +3,7 @@ import type { DatabaseSync } from 'node:sqlite'
 import { LOCAL_USER_ID, requireProject } from '../core/db'
 import { listFiles } from './files'
 import { httpError } from '../core/http'
+import { deleteStudySessions } from '../core/sessions'
 import { usageByModel } from '../core/usage'
 
 const text = (maxLength: number) => ({ type: 'string', minLength: 1, maxLength })
@@ -70,6 +71,8 @@ export function projectRoutes(app: FastifyInstance, db: DatabaseSync) {
 
   app.delete<Params>('/api/projects/:id', async (req, reply) => {
     requireProject(db, req.params.id)
+    const studies = db.prepare('SELECT id FROM studies WHERE project_id = ?').all(req.params.id) as { id: string }[]
+    deleteStudySessions(db, studies.map(s => s.id))
     db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id)
     return reply.code(204).send()
   })

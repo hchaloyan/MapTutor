@@ -31,7 +31,6 @@ export function Chat(props: {
   onSend(): void
   onStop(): void
   onRetry(): void
-  onKeyLink(): void
   renderCard(card: Card): ReactNode
   banner?: ReactNode
   /** Drawn after the live reply and any error (the goal-complete card). */
@@ -94,16 +93,7 @@ export function Chat(props: {
           )}
           {error && (
             <div className="chat-error">
-              {error.text}
-              {error.keyLink && (
-                <>
-                  {' '}
-                  <button className="text-action" onClick={props.onKeyLink}>
-                    API key
-                  </button>
-                  .
-                </>
-              )}{' '}
+              {error.text}{' '}
               <button className="text-action" onClick={props.onRetry}>
                 Retry
               </button>

@@ -3,9 +3,9 @@
 ## Why
 
 - **Familiar tools.** The stack is TypeScript end to end and reuses tools already known from Leetboard and Recipe Storer.
-- **BYOK.** It removes billing and accounts while the users are a small group of friends.
-- **Server-side proxy.** Proxying API calls through the backend keeps the tool loop and the state guards on the server, where the client can't bypass them. It's also where a server-owned key slots in if the app goes public.
-- **Prompt caching.** It's the main cost lever, because every request resends the fixed prompt and the project files.
+- **The Claude Agent SDK on a Claude subscription.** The tutor runs inside Claude Code, signed in with the user's own subscription, so there's no API key and no per-token bill. This is for personal use only: subscription sign-in covers the subscriber's own use, never serving other people.
+- **The loop stays on the server.** The tool loop, the state guards and the database writes run in the backend, where the client can't bypass them.
+- **One session per thread.** Claude Code keeps each thread's transcript and caches its prefix (the system prompt, the project files, the earlier turns) on its own.
 
 ## Frontend
 
@@ -25,13 +25,15 @@ The backend:
 - runs the tool loop ([02-agent.md](02-agent.md#tool-loop))
 - enforces phase and state guards
 - serves files
-- proxies Anthropic calls
+- runs the tutor through the Agent SDK and serves its tools to Claude Code over MCP (`POST /mcp/:hop`)
 
-## BYOK
+## Claude sign-in
 
-- **Storage.** The user pastes their Anthropic key into a settings panel. It's kept in the browser's `localStorage` and never in the database.
-- **Requests.** Each request sends the key in a header to the backend. The backend forwards it to the Anthropic API and drops it. Keys are never logged; logs are redacted.
-- **Why proxy at all.** It keeps the tool loop, the guards, and the DB writes server-side. It's also the seam where a server-owned key and billing can be swapped in if this goes public later.
+- **Token.** `claude setup-token` prints a long-lived token for the user's subscription. It's set as `CLAUDE_CODE_OAUTH_TOKEN` in the server's environment and never written to the repo, the database or the browser. `npm run dev:server` exits with instructions when it's missing.
+- **No API key, ever.** The environment passed to Claude Code drops every `ANTHROPIC_*` variable and every inherited `CLAUDE*` variable except the token, so an API key set in the shell can't switch the app to per-token billing.
+- **Isolation.** Every query ignores the user's own Claude Code setup: no settings files (`settingSources: []`), its own empty working directory (`data/agent`) and config directory (`data/claude`), only the tutor's MCP server (`strictMcpConfig`), `permissionMode: 'dontAsk'`, prompts sent verbatim, and `WebSearch` as the only built-in tool. No CLAUDE.md, memory, plugins or hooks reach the tutor.
+- **Transcripts** live in SQLite (`agent_entries`, see [04-data-model.md](04-data-model.md)), so Claude Code's local cleanup or a moved repo loses nothing. Deleting a goal deletes its transcripts.
+- **Errors** read as plain words in the chat: not signed in (with the command to fix it), the plan's usage limit, overloaded, or `Claude error: …`.
 
 ## Uploads
 
@@ -46,13 +48,15 @@ Size limits: 5 MB per image (the API limit) and 20 MB per project in total, so t
 
 ## Caching and cost
 
-- **Two prompt-cache breakpoints:** one after the fixed system prompt, and one after the project files. Every turn reuses both, which is the biggest cost lever for BYOK users.
-- **Small per-turn context:** per-node threads and Known-node summaries keep the uncached part small.
+Use counts against the plan's usage limits, not a bill.
+
+- **Caching** is Claude Code's own (no explicit `cache_control`). Each thread's session is append-only, so its prefix stays cached from hop to hop.
+- **Small per-thread context:** per-node threads and Known-node summaries keep each session short.
 - **Web search** is uncapped; the model decides how much to search, and the usage popover shows the count (see [02-agent.md](02-agent.md#verification)).
-- **Usage display:** a **Usage** popover per goal and per project, taken from the API response's usage fields: total tokens, web searches, and each model's input, output, and cached tokens. Tokens only, no money.
+- **Usage display:** a **Usage** popover per goal and per project: total tokens, web searches, and each model's input, output, and cached tokens. Each hop records its `modelUsage` minus the session's totals before the hop, because Claude Code reports them cumulatively per session. Tokens only, no money.
 
 ## Model
 
 - **Tutor:** a strong model, because teaching quality depends on it.
-- **Side calls:** a cheaper model for node summaries and URL-to-Markdown cleanup.
+- **Side calls:** a cheaper model at low effort for node summaries and URL-to-Markdown cleanup, with no tools and no saved session.
 - **Configuration:** both model names live in config. Check the Claude API docs for current model IDs.

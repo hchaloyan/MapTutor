@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
+import { z } from 'zod'
 import { transaction } from '../core/db'
 import { type Edge, type GraphNode, initialState, type NodeKind, type NodeState, validateGraph } from './graph'
 import { probeStrands } from './quiz'
@@ -38,35 +39,20 @@ export const proposeGraphTool: ClientTool = {
       'The app computes each node\'s state from the probe evidence, draws the graph, and shows an approval card. It returns { decision: "approved" } or { decision: "feedback", text } once the user responds. Calling it again replaces the graph.',
       'Node ids are short and unique within the graph; quiz-checks use them as nodeId. Every strand on a node must be the exact name of a strand used on probe questions.',
     ].join('\n\n'),
-    input_schema: {
-      type: 'object',
-      properties: {
-        approach: { type: 'string', description: 'What you will cover, in what order, and why this way. Shown above the approval card.' },
-        nodes: {
-          type: 'array',
-          minItems: 1,
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              label: { type: 'string', description: 'About 3 words; it sits inside a small circle on the map.' },
-              kind: { type: 'string', enum: ['root', 'derived', 'goal'] },
-              description: { type: 'string' },
-              strands: { type: 'array', items: { type: 'string' }, description: 'Probe strands that bear on this node.' },
-            },
-            required: ['id', 'label', 'kind', 'description', 'strands'],
-          },
-        },
-        edges: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: { from: { type: 'string', description: 'The prerequisite.' }, to: { type: 'string' } },
-            required: ['from', 'to'],
-          },
-        },
-      },
-      required: ['approach', 'nodes', 'edges'],
+    shape: {
+      approach: z.string().describe('What you will cover, in what order, and why this way. Shown above the approval card.'),
+      nodes: z
+        .array(
+          z.object({
+            id: z.string(),
+            label: z.string().describe('About 3 words; it sits inside a small circle on the map.'),
+            kind: z.enum(['root', 'derived', 'goal']),
+            description: z.string(),
+            strands: z.array(z.string()).describe('Probe strands that bear on this node.'),
+          }),
+        )
+        .min(1),
+      edges: z.array(z.object({ from: z.string().describe('The prerequisite.'), to: z.string() })),
     },
   },
   phases: ['probe', 'plan'],

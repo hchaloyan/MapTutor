@@ -1,42 +1,41 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { expect, test } from 'vitest'
-import type { MessageStreamParams } from './context'
 import { LOCAL_USER_ID, openDb } from '../core/db'
-import { appendUserMessage, MAX_STEPS, pendingCard, runTurn, type StreamMessage } from './loop'
+import type { Block } from './engine'
+import { appendUserMessage, clearPending, MAX_STEPS, pendingCard, retryPrompt, runTurn } from './loop'
+import { scripted, text, texts, toolCall, ZERO } from './scripted'
 
-type Reply = Omit<Partial<Anthropic.Beta.BetaMessage>, 'content'> & { content: unknown[] }
-
-const text = (t: string): Reply => ({ content: [{ type: 'text', text: t }], stop_reason: 'end_turn' })
-const toolCall = (name: string, input: unknown, id = 'tu_1'): Reply => ({ content: [{ type: 'tool_use', id, name, input }], stop_reason: 'tool_use' })
 const QUESTION = { question: 'What is the goal?', options: [{ label: 'Pass the midterm' }, { label: 'Understand it deeply' }] }
+type Content = { type: string; text?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }[]
 
-function setup(script: Reply[] | (() => Reply)) {
+function setup(script: Parameters<typeof scripted>[0], phase = 'probe') {
   const db = openDb(':memory:')
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', ?, 'Calc', 0)").run(LOCAL_USER_ID)
-  db.prepare("INSERT INTO studies (id, project_id, goal, phase, created_at) VALUES ('s1', 'p1', 'midterm', 'probe', 0)").run()
-  const calls: MessageStreamParams[] = []
-  const events: [string, Record<string, unknown>][] = []
-  const streamMessage: StreamMessage = async (params, _key, onText) => {
-    calls.push(structuredClone(params))
-    const reply = typeof script === 'function' ? script() : script.shift()!
-    for (const b of reply.content as { type: string; text?: string }[]) if (b.type === 'text') onText(b.text!)
-    return { stop_reason: 'end_turn', ...reply } as Anthropic.Beta.BetaMessage
+  db.prepare("INSERT INTO studies (id, project_id, goal, phase, created_at) VALUES ('s1', 'p1', 'midterm', ?, 0)").run(phase)
+  for (const id of ['n1', 'n2']) {
+    db.prepare("INSERT INTO nodes (id, study_id, label, kind, description, state, updated_at) VALUES (?, 's1', ?, 'root', 'd', 'untested', 0)").run(id, id.toUpperCase())
   }
-  const run = () => runTurn({ db, studyId: 's1', nodeId: null, apiKey: 'sk-test', streamMessage, emit: (e, d) => events.push([e, d as Record<string, unknown>]) })
-  const say = (t: string) => appendUserMessage(db, 's1', null, [{ type: 'text', text: t }])
-  const rows = () =>
-    (db.prepare('SELECT role, content, pending FROM messages ORDER BY created_at, rowid').all() as { role: string; content: string; pending: number }[]).map(r => ({
+  const s = scripted(script)
+  const events: [string, Record<string, unknown>][] = []
+  const run = (prompt: Block[] | null = [{ type: 'text', text: 'hello' }], opts: { nodeId?: string; signal?: AbortSignal } = {}) =>
+    runTurn({ db, studyId: 's1', nodeId: opts.nodeId ?? null, prompt, runHop: s.runHop, signal: opts.signal, emit: (e, d) => events.push([e, d as Record<string, unknown>]) })
+  const rows = (nodeId: string | null = null) =>
+    (db.prepare('SELECT role, content, pending FROM messages WHERE node_id IS ? ORDER BY created_at, rowid').all(nodeId) as { role: string; content: string; pending: number }[]).map(r => ({
       ...r,
-      content: JSON.parse(r.content) as Record<string, unknown>[],
+      content: JSON.parse(r.content) as Content,
     }))
-  return { db, calls, events, run, say, rows }
+  const session = (nodeId: string | null = null) =>
+    (nodeId
+      ? db.prepare("SELECT session_id AS id FROM nodes WHERE study_id = 's1' AND id = ?").get(nodeId)
+      : db.prepare("SELECT session_id AS id FROM studies WHERE id = 's1'").get()) as { id: string | null }
+  const history = (nodeId: string | null = null) => s.runHop.sessions.get(session(nodeId).id!)!
+  return { db, calls: s.calls, events, run, rows, session, history }
 }
 
-const noCache = <T>(value: T): T => JSON.parse(JSON.stringify(value, (k, v) => (k === 'cache_control' ? undefined : v)))
+const resultOf = (m: Anthropic.Beta.BetaMessageParam | undefined) => (m?.content as Content).find(b => b.type === 'tool_result')!
 
 test('streams text and stores the assistant reply', async () => {
   const t = setup([text('Hi')])
-  t.say('hello')
   await t.run()
   expect(t.events).toEqual([['text', { delta: 'Hi' }], ['done', { awaiting: false }]])
   expect(t.rows().map(r => r.role)).toEqual(['user', 'assistant'])
@@ -44,20 +43,28 @@ test('streams text and stores the assistant reply', async () => {
 
 test('history is append-only across turns', async () => {
   const t = setup([text('first'), text('second')])
-  t.say('one')
-  await t.run()
-  t.say('two')
-  await t.run()
-  const [a, b] = t.calls.map(noCache)
-  expect(b.system).toEqual(a.system)
-  expect(b.tools).toEqual(a.tools)
-  expect(b.messages.slice(0, a.messages.length)).toEqual(a.messages)
-  expect(b.messages).toHaveLength(a.messages.length + 2)
+  await t.run([{ type: 'text', text: 'one' }])
+  await t.run([{ type: 'text', text: 'two' }])
+  const [a, b] = t.calls
+  expect(b.slice(0, a.length)).toEqual(a)
+  expect(b).toHaveLength(a.length + 2)
 })
 
-test('a valid ask_user_question pauses with a card', async () => {
+test("a new thread's first prompt carries the files, the text and study_state; later prompts carry no files", async () => {
+  const t = setup([text('first'), text('second')])
+  t.db.prepare("INSERT INTO files (id, project_id, kind, name, data, created_at) VALUES ('f1', 'p1', 'pdf', 'slides.pdf', ?, 0)").run(Buffer.from('%PDF'))
+  await t.run([{ type: 'text', text: 'one' }])
+  await t.run([{ type: 'text', text: 'two' }])
+  const types = (m: Anthropic.Beta.BetaMessageParam) => (m.content as Content).map(b => b.type)
+  expect(types(t.calls[0][0])).toEqual(['document', 'text', 'text'])
+  expect(types(t.calls[1].at(-1)!)).toEqual(['text', 'text'])
+  expect(t.session().id).toMatch(/^sim_/)
+  // The mirror keeps the prompt without the file blocks.
+  expect(t.rows()[0].content.map(b => b.type)).toEqual(['text', 'text'])
+})
+
+test('a valid ask_user_question defers into a pending card', async () => {
   const t = setup([toolCall('ask_user_question', QUESTION)])
-  t.say('help me study')
   await t.run()
   expect(t.calls).toHaveLength(1)
   expect(t.events).toEqual([
@@ -68,28 +75,161 @@ test('a valid ask_user_question pauses with a card', async () => {
   expect(pendingCard(t.db, 's1', null)?.toolUse.id).toBe('tu_1')
 })
 
-test('a malformed ask_user_question is returned as an error', async () => {
+test('a malformed card call is denied with the check error', async () => {
   const t = setup([toolCall('ask_user_question', { question: 'Goal?', options: [{ label: 'Only one' }] }), text('ok')])
-  t.say('help')
   await t.run()
-  expect(t.calls).toHaveLength(2)
-  const result = t.rows()[2].content[0]
-  expect(result).toMatchObject({ type: 'tool_result', tool_use_id: 'tu_1', is_error: true })
-  expect(result.content).toBe('ask_user_question needs a question and 2–4 options, each with a non-empty, distinct label.')
+  const result = resultOf(t.calls[1].at(-1))
+  expect(result).toMatchObject({ is_error: true })
+  expect(texts(result.content)).toEqual(['ask_user_question needs a question and 2–4 options, each with a non-empty, distinct label.'])
+  expect(t.events.some(([e]) => e === 'card')).toBe(false)
   expect(pendingCard(t.db, 's1', null)).toBeNull()
+})
+
+test('a tool outside the phase is denied', async () => {
+  const t = setup([toolCall('focus_node', { nodeId: 'n1' }), text('ok')])
+  await t.run()
+  expect(texts(resultOf(t.calls[1].at(-1)).content)).toEqual(["`focus_node` isn't available in the probe phase."])
+  expect(t.events.some(([e]) => e === 'focus')).toBe(false)
 })
 
 test('an unknown tool becomes an error tool_result', async () => {
   const t = setup([toolCall('teleport', {}), text('ok')])
-  t.say('help')
   await t.run()
-  expect(t.rows()[2].content[0]).toMatchObject({ type: 'tool_result', is_error: true, content: 'Unknown tool `teleport`.' })
+  expect(resultOf(t.calls[1].at(-1))).toMatchObject({ is_error: true, content: [{ type: 'text', text: 'Unknown tool `teleport`.' }] })
+  expect(t.events.at(-1)).toEqual(['done', { awaiting: false }])
+})
+
+test('server tool results end with study_state', async () => {
+  const t = setup([toolCall('set_goal_title', { title: 'Ace the midterm' }), text('ok')])
+  await t.run()
+  const [first, last] = [texts(resultOf(t.calls[1].at(-1)).content)[0], texts(resultOf(t.calls[1].at(-1)).content).at(-1)!]
+  expect(first).toBe('Goal title set to "Ace the midterm".')
+  expect(last.startsWith('<study_state>')).toBe(true)
+  // The mirror holds the tool_result row the engine reported.
+  expect(t.rows().map(r => r.content[0].type)).toEqual(['text', 'tool_use', 'tool_result', 'text'])
+})
+
+test('answering resumes with no prompt and the stored answer', async () => {
+  const t = setup([toolCall('ask_user_question', QUESTION), text('Great.')])
+  await t.run()
+  const card = pendingCard(t.db, 's1', null)!
+  clearPending(t.db, card.messageId)
+  appendUserMessage(t.db, 's1', null, [{ type: 'tool_result', tool_use_id: 'tu_1', content: JSON.stringify({ answers: ['Pass the midterm'] }) }])
+  await t.run(null)
+  expect(texts(resultOf(t.calls[1].at(-1)).content)[0]).toBe('{"answers":["Pass the midterm"]}')
+  expect(t.rows().filter(r => r.content.some(b => b.type === 'tool_result'))).toHaveLength(1)
+  expect(t.events.at(-1)).toEqual(['done', { awaiting: false }])
+})
+
+test('a stored answer reaches the session even when the answer changed the phase', async () => {
+  // Approving the plan moves the study to teach, where propose_graph is no longer allowed.
+  const graph = {
+    approach: 'A then G.',
+    nodes: [
+      { id: 'a', label: 'A', kind: 'root', description: 'd', strands: ['limits'] },
+      { id: 'g', label: 'G', kind: 'goal', description: 'd', strands: [] },
+    ],
+    edges: [{ from: 'a', to: 'g' }],
+  }
+  const t = setup([toolCall('propose_graph', graph), text('Great.')])
+  t.db.prepare(
+    "INSERT INTO quiz_items (id, study_id, quiz_call_id, phase, strand, prompt, options, correct_option_id, explanation, chosen_option_id, answered_at) VALUES ('q', 's1', 'c', 'probe', 'limits', 'p', '[]', 'a', 'e', 'a', 0)",
+  ).run()
+  await t.run()
+  expect(t.events.at(-1)).toEqual(['done', { awaiting: true }])
+  clearPending(t.db, pendingCard(t.db, 's1', null)!.messageId)
+  t.db.prepare("UPDATE studies SET phase = 'teach' WHERE id = 's1'").run()
+  appendUserMessage(t.db, 's1', null, [{ type: 'tool_result', tool_use_id: 'tu_1', content: '{"decision":"approved"}' }])
+  await t.run(null)
+  expect(resultOf(t.calls[1].at(-1))).not.toHaveProperty('is_error')
+  expect(texts(resultOf(t.calls[1].at(-1)).content)[0]).toBe('{"decision":"approved"}')
+})
+
+test('a card call batched with another tool is refused, not run', async () => {
+  const t = setup([
+    { content: [{ type: 'tool_use', id: 'tu_a', name: 'ask_user_question', input: QUESTION }, { type: 'tool_use', id: 'tu_t', name: 'set_goal_title', input: { title: 'T' } }], stop_reason: 'tool_use' },
+    text('ok'),
+  ])
+  await t.run()
+  const results = (t.calls[1].at(-1)!.content as Content).filter(b => b.type === 'tool_result')
+  expect(results[0]).toMatchObject({ tool_use_id: 'tu_a', is_error: true })
+  expect(texts(results[0].content)[0]).toBe('Call `ask_user_question` on its own, with no other tool call in the same message.')
+  expect(texts(results[1].content)[0]).toBe('Goal title set to "T".')
+  expect(t.rows().some(r => r.pending)).toBe(false)
+  expect(t.events.some(([e]) => e === 'card')).toBe(false)
+})
+
+test("focus_node ends the hop and continues in the node's thread", async () => {
+  const t = setup([toolCall('focus_node', { nodeId: 'n1' }), text('Lesson.')], 'teach')
+  await t.run()
+  expect(t.events).toEqual([['focus', { nodeId: 'n1' }], ['text', { delta: 'Lesson.' }], ['done', { awaiting: false }]])
+  expect(t.history().at(-1)!.content).toEqual([expect.objectContaining({ type: 'tool_result', tool_use_id: 'tu_1' })])
+  expect(texts(t.history('n1')[0].content)[0]).toBe('[App: focus_node opened this thread. Continue the lesson for "N1" here.]')
+  expect(t.session('n1').id).toMatch(/^sim_/)
+  expect(t.rows('n1').map(r => r.role)).toEqual(['user', 'assistant'])
+})
+
+test('max_tokens and max_turns end the turn with an error', async () => {
+  const cut = setup([{ content: [{ type: 'text', text: 'Long' }], stop_reason: 'max_tokens' }])
+  await cut.run()
+  expect(cut.events.slice(-2)).toEqual([['error', { message: 'The reply was too long and got cut off.' }], ['done', { awaiting: false }]])
+  let n = 0
+  const busy = setup(() => toolCall('set_goal_title', { title: 'T' }, `tu_${n++}`))
+  await busy.run()
+  expect(busy.calls).toHaveLength(20)
+  expect(busy.events.slice(-2)).toEqual([['error', { message: 'The tutor took too many steps. Send a message to continue.' }], ['done', { awaiting: false }]])
+})
+
+test('hops stop after MAX_STEPS', async () => {
+  let n = 0
+  const t = setup(() => toolCall('focus_node', { nodeId: n % 2 ? 'n1' : 'n2' }, `tu_${n++}`), 'teach')
+  await t.run()
+  expect(t.events.filter(([e]) => e === 'focus')).toHaveLength(MAX_STEPS)
+  expect(t.events.slice(-2)).toEqual([['error', { message: 'The tutor took too many steps. Send a message to continue.' }], ['done', { awaiting: false }]])
+})
+
+test("each hop's usage is recorded", async () => {
+  const usage = (input: number) => ({ ...ZERO, input_tokens: input, output_tokens: 1, server_tool_use: { web_search_requests: 1 } })
+  const t = setup([{ ...toolCall('focus_node', { nodeId: 'n1' }), usage: usage(10) }, { ...text('Lesson.'), usage: usage(20) }], 'teach')
+  await t.run()
+  expect(t.db.prepare('SELECT study_id, model, input_tokens, output_tokens, web_searches FROM usage ORDER BY id').all()).toEqual([
+    { study_id: 's1', model: 'claude-opus-5-5', input_tokens: 10, output_tokens: 1, web_searches: 1 },
+    { study_id: 's1', model: 'claude-opus-5-5', input_tokens: 20, output_tokens: 1, web_searches: 1 },
+  ])
+})
+
+test('retryPrompt resumes a stored answer and otherwise sends the app note', async () => {
+  const t = setup([toolCall('ask_user_question', QUESTION), text('ok')])
+  const note = [{ type: 'text', text: '[App: Your last reply did not arrive. Reply to the thread as it stands.]' }]
+  await t.run()
+  clearPending(t.db, pendingCard(t.db, 's1', null)!.messageId)
+  appendUserMessage(t.db, 's1', null, [{ type: 'tool_result', tool_use_id: 'tu_1', content: '{"answers":["A"]}' }])
+  expect(retryPrompt(t.db, 's1', null)).toBeNull()
+  appendUserMessage(t.db, 's1', null, [{ type: 'text', text: 'hello?' }])
+  expect(retryPrompt(t.db, 's1', null)).toEqual(note)
+})
+
+test('a resume with nothing deferred sends the app note instead', async () => {
+  // The answer reached the session, then the model call failed: Retry finds no deferred call left.
+  let fail = true
+  const t = setup([toolCall('ask_user_question', QUESTION), () => {
+    if (fail) throw new Error('usage limit')
+    return text('unused')
+  }, text('Back.')])
+  await t.run()
+  clearPending(t.db, pendingCard(t.db, 's1', null)!.messageId)
+  appendUserMessage(t.db, 's1', null, [{ type: 'tool_result', tool_use_id: 'tu_1', content: '{"answers":["A"]}' }])
+  await expect(t.run(null)).rejects.toThrow('usage limit')
+  fail = false
+  t.calls.length = 0
+  await t.run(retryPrompt(t.db, 's1', null))
+  const last = t.calls[0].at(-1)!
+  expect(texts(last.content)[0]).toBe('[App: Your last reply did not arrive. Reply to the thread as it stands.]')
   expect(t.events.at(-1)).toEqual(['done', { awaiting: false }])
 })
 
 test('pause_turn continues the turn', async () => {
   const t = setup([{ content: [{ type: 'text', text: 'searching' }], stop_reason: 'pause_turn' }, text('found it')])
-  t.say('check this')
   await t.run()
   expect(t.calls).toHaveLength(2)
   expect(t.events.filter(([e]) => e === 'done')).toEqual([['done', { awaiting: false }]])
@@ -97,57 +237,29 @@ test('pause_turn continues the turn', async () => {
 
 test('refusal ends the turn with an error', async () => {
   const t = setup([{ content: [], stop_reason: 'refusal' }])
-  t.say('help')
   await t.run()
   expect(t.events).toEqual([['error', { message: 'The tutor declined to answer that. Try rephrasing.' }], ['done', { awaiting: false }]])
 })
 
-test('stops after MAX_STEPS model calls', async () => {
-  let n = 0
-  const t = setup(() => toolCall('teleport', {}, `tu_${n++}`))
-  t.say('help')
-  await t.run()
-  expect(t.calls).toHaveLength(MAX_STEPS)
-  expect(t.events.slice(-2)).toEqual([
-    ['error', { message: 'The tutor took too many steps. Send a message to continue.' }],
-    ['done', { awaiting: false }],
-  ])
-})
-
 test('every user message the server sends ends with study_state', async () => {
   const t = setup([toolCall('teleport', {}), text('ok')])
-  t.say('help')
   await t.run()
-  for (const row of t.rows().filter(r => r.role === 'user')) {
-    expect(String(row.content.at(-1)?.text)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, propose_graph, set_goal_title, web_search\n<\/study_state>$/)
+  for (const m of t.history().filter(m => m.role === 'user')) {
+    const blocks = m.content as Content
+    const last = blocks[0].type === 'tool_result' ? texts(blocks[0].content).at(-1) : blocks.at(-1)?.text
+    if (blocks[0].type === 'tool_result' && blocks[0].is_error) continue // the CLI words a denied call itself
+    expect(String(last)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, propose_graph, set_goal_title, WebSearch\n[\s\S]*<\/study_state>$/)
   }
 })
 
-/** A turn whose model calls are driven by `steps`; each gets the stream callbacks and options. */
-function controlled(steps: ((onText: (d: string) => void, opts: Parameters<StreamMessage>[3]) => Promise<Reply>)[]) {
-  const t = setup([])
-  const controller = new AbortController()
-  const streamMessage: StreamMessage = async (params, _key, onText, opts) => {
-    t.calls.push(structuredClone(params))
-    return { stop_reason: 'end_turn', ...(await steps.shift()!(onText, opts)) } as Anthropic.Beta.BetaMessage
-  }
-  const run = (signal?: AbortSignal) =>
-    runTurn({ db: t.db, studyId: 's1', nodeId: null, apiKey: 'sk-test', streamMessage, signal, emit: (e, d) => t.events.push([e, d as Record<string, unknown>]) })
-  return { ...t, controller, run }
-}
-
-const USAGE = { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
-
 test('status events from the stream reach the client', async () => {
-  const t = controlled([
-    async (onText, opts) => {
-      opts?.onStatus?.('thinking')
-      opts?.onStatus?.('searching')
-      onText('Hi')
+  const t = setup([
+    async (_m, opts) => {
+      opts.onStatus('thinking')
+      opts.onStatus('searching')
       return text('Hi')
     },
   ])
-  t.say('hello')
   await t.run()
   expect(t.events).toEqual([
     ['status', { kind: 'thinking' }],
@@ -157,70 +269,59 @@ test('status events from the stream reach the client', async () => {
   ])
 })
 
+const controller = () => new AbortController()
+
 test('a stop mid-stream keeps the streamed text and ends with one done', async () => {
-  const t = controlled([
-    async (onText, opts) => {
-      onText('Partial ')
-      onText('answer')
-      t.controller.abort()
-      expect(opts?.signal?.aborted).toBe(true)
-      // The real stream resolves with the partial message: no stop_reason, maybe a cut-off tool call.
-      return {
-        model: 'claude-opus-5-5',
-        usage: USAGE as Anthropic.Beta.BetaUsage,
-        stop_reason: null,
-        content: [
-          { type: 'thinking', thinking: '', signature: 'sig' },
-          { type: 'text', text: 'Partial answer' },
-          { type: 'tool_use', id: 'tu_1', name: 'quiz', input: {} },
-        ],
-      }
+  const c = controller()
+  const t = setup([
+    async (_m, opts) => {
+      opts.onText('Partial ')
+      opts.onText('answer')
+      c.abort()
+      expect(opts.signal?.aborted).toBe(true)
+      throw new Error('Request was aborted.')
     },
   ])
-  t.say('hello')
-  await t.run(t.controller.signal)
+  await t.run(undefined, { signal: c.signal })
   expect(t.events).toEqual([['text', { delta: 'Partial ' }], ['text', { delta: 'answer' }], ['done', { awaiting: false }]])
-  expect(t.rows().map(r => [r.role, r.content, r.pending])).toEqual([
-    ['user', expect.any(Array), 0],
-    ['assistant', [{ type: 'text', text: 'Partial answer' }], 0],
+  expect(t.rows().map(r => [r.role, r.content.map(b => b.text ?? b.type), r.pending])).toEqual([
+    ['user', ['hello', expect.stringMatching(/^<study_state>/)], 0],
+    ['assistant', ['Partial answer'], 0],
   ])
-  expect(t.db.prepare('SELECT model, input_tokens, output_tokens FROM usage').all()).toEqual([{ model: 'claude-opus-5-5', input_tokens: 10, output_tokens: 2 }])
+  expect(t.db.prepare('SELECT count(*) AS n FROM usage').get()).toEqual({ n: 0 }) // an aborted hop records no usage
 })
 
 test('a stop before any text stores nothing and the next message still works', async () => {
-  const t = controlled([
+  const c = controller()
+  const t = setup([
     async () => {
-      t.controller.abort()
+      c.abort()
       throw new Error('Request was aborted.')
     },
-    async onText => {
-      onText('Back.')
-      return text('Back.')
-    },
+    text('Back.'),
   ])
-  t.say('one')
-  await t.run(t.controller.signal)
+  await t.run([{ type: 'text', text: 'one' }], { signal: c.signal })
   expect(t.events).toEqual([['done', { awaiting: false }]])
   expect(t.rows().map(r => r.role)).toEqual(['user'])
-  t.say('two')
-  await t.run()
+  await t.run([{ type: 'text', text: 'two' }])
   expect(t.rows().map(r => r.role)).toEqual(['user', 'user', 'assistant'])
-  expect(t.calls[1].messages.map(m => m.role)).toEqual(['user', 'user'])
+  expect(t.calls[1].map(m => m.role)).toEqual(['user', 'user'])
 })
 
 test('a stop between steps makes no further model call', async () => {
-  const t = controlled([
+  const c = controller()
+  const t = setup([
     async () => {
       // The stream finished just as the user pressed Stop: the tool runs, nothing after it does.
-      t.controller.abort()
+      c.abort()
       return toolCall('set_goal_title', { title: 'Ace the midterm' })
     },
-    async () => text('never'),
+    text('never'),
   ])
-  t.say('help')
-  await t.run(t.controller.signal)
+  await t.run(undefined, { signal: c.signal })
   expect(t.calls).toHaveLength(1)
   expect(t.events.filter(([e]) => e === 'done')).toEqual([['done', { awaiting: false }]])
   expect(t.db.prepare('SELECT title FROM studies').get()).toEqual({ title: 'Ace the midterm' })
   expect(t.rows().at(-1)!.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'tu_1' })
 })
+

@@ -1,5 +1,3 @@
-import { getKey } from './key'
-
 export type NodeState = 'untested' | 'missed' | 'frontier' | 'known'
 export type Phase = 'probe' | 'plan' | 'teach' | 'done'
 export type Usage = {
@@ -60,14 +58,12 @@ export class ApiError extends Error {
   }
 }
 
-/** Calls the server with the saved key (unless `headers` sets one). Throws ApiError with the server's message. */
+/** Calls the server. Throws ApiError with the server's message. */
 export async function api<T = unknown>(
   path: string,
   init: { method?: string; json?: unknown; body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal } = {},
 ): Promise<T> {
   const headers = new Headers(init.headers)
-  const key = getKey()
-  if (key && !headers.has('x-anthropic-key')) headers.set('x-anthropic-key', key)
   if (init.json !== undefined) headers.set('content-type', 'application/json')
   const res = await fetch(path, {
     method: init.method ?? 'GET',

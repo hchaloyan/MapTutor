@@ -82,20 +82,13 @@ Light-mode node labels stay charcoal (`ink`), no edge. Dark values for `accent-t
 
 ## Screens
 
-### Welcome (no key saved)
+### Welcome (removed)
 
-Its own page: `bg`, "MapTutor" wordmark top center, one centered surface card:
-
-- Title **Bring your own key**
-- Body: "MapTutor talks to Claude using your Anthropic API key. It's saved only in this browser and passed to Anthropic with each request, never stored on the server." + **Get a key →** (links to the Anthropic console)
-- Key field (`sk-ant-…`, monospace) with a **Show / Hide** toggle inside it on the right
-- Footer: **Look around first** (muted text, left) and **Save** (primary, right) **(my call: "Save", matching the key panel; the mockup said "Save key")**
-- Saving runs the key check (see Backend changes). Rejected → "✗ Anthropic rejected this key" in the footer's left slot, key not saved. Accepted → saved to `localStorage`, go to the projects screen.
-- **Look around first** dismisses it. Trying to send anything to the tutor without a key opens the API key panel.
+Removed with the Agent SDK switch: the tutor signs in on the server, so the app opens on the projects screen.
 
 ### Projects screen (sidebar + project page)
 
-Top bar: **MapTutor** wordmark left; **Usage** (project totals), **⚙ API key**, theme toggle right.
+Top bar: **MapTutor** wordmark left; **Usage** (project totals), theme toggle right.
 
 **Sidebar** (≈220px, left, divider on its right):
 
@@ -121,7 +114,7 @@ Top bar: **MapTutor** wordmark left; **Usage** (project totals), **⚙ API key**
 
 The projects sidebar is hidden; the goal screen is full width.
 
-**Top bar:** **← Calculus 101** (muted, back to the project page) and the goal text (17px, 800) on the left; phase steps in the middle; **Usage** (goal totals), **⚙ API key**, theme toggle on the right.
+**Top bar:** **← Calculus 101** (muted, back to the project page) and the goal text (17px, 800) on the left; phase steps in the middle; **Usage** (goal totals), theme toggle on the right.
 
 **Phase steps:** `Probe — Plan — Teach — Done` with short connector lines; past and future steps muted, the current one in `ink` with an accent dot. **(my call: Done is a fourth step that lights with ✓ when reached.)**
 
@@ -185,7 +178,7 @@ When the goal node turns Known: one burst of confetti (state colors and accent) 
 - **While the tutor works:** Send becomes **Stop** (primary, accent, with a small square icon). You can keep typing; a message sent meanwhile goes once the reply finishes.
 - **Waiting indicator:** until the first text arrives, a tutor card shows a spinner and "Thinking · 14s" or "Searching the web · 22s", with a running timer. Text then streams in live.
 - **While a card awaits an answer:** the composer is paused and reads "Answer the card above to continue".
-- **Errors:** red `error-text` in plain words where the reply would have been, no bubble, ending with a **Retry** link (e.g. "⚠ Your Anthropic API key was rejected. Check it under API key." with "API key" opening the panel). Retry re-runs the reply from the thread as it stands; your message is never sent twice (Backend changes #11). The error and its Retry live only in the open page; after a reload the thread just ends with your message, and sending anything continues it **(my call, revised while planning: the server can't tell a failed thread from one the tutor left on purpose by switching nodes)**.
+- **Errors:** red `error-text` in plain words where the reply would have been, no bubble, ending with a **Retry** link (e.g. "⚠ Claude isn't signed in. Run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN, and restart the server."). Retry re-runs the reply from the thread as it stands; your message is never sent twice (Backend changes #11). The error and its Retry live only in the open page; after a reload the thread just ends with your message, and sending anything continues it **(my call, revised while planning: the server can't tell a failed thread from one the tutor left on purpose by switching nodes)**.
 - **Node switch mid-reply** (`focus` event): the chat follows into that node's thread automatically and that node pops out on the graph.
 - **Sources:** hidden. Thinking: never shown.
 - Auto-scroll follows streaming text unless the user has scrolled up **(my call)**.
@@ -225,13 +218,9 @@ A card after the tutor's last message: "Goal complete" (17px, 800), "7 of 7 know
 
 ## Panels and dialogs
 
-### API key panel (top bar ⚙ API key)
+### API key panel (removed)
 
-A popover under the button:
-
-- Title row: **API key** (left), **Remove** (danger text, clickable) (right).
-- The key field, masked (`sk-ant-•••••••a1B2`), with a **Show / Hide** toggle inside it on the right. You edit the key right in the field.
-- Status row: on the left, "✓ Key accepted by Anthropic" (`ok-text`) or "✗ Anthropic rejected this key" (`danger`); on the right, **Save** (primary) **only after the field is edited**, otherwise nothing. No Replace button.
+Removed with the Agent SDK switch, along with the top bar's **⚙ API key** button.
 
 ### Usage popover (top bar Usage)
 
@@ -254,7 +243,7 @@ Each is small; do them test-first like the earlier components.
 2. **Remove the web search cap:** `studies.search_cap`, the `searchCap` request field and response field, `WEB_SEARCH_MAX_USES`, and `max_uses` on the web search tool (the model decides how much to search).
 3. **Status events:** an SSE `status { kind: 'thinking' | 'searching' }` when a thinking block or a `web_search` server tool use starts streaming. The timer runs on the client.
 4. **Stop:** `POST /api/studies/:id/stop` cancels the running turn (abort the SDK stream). Text streamed so far is saved as a text-only assistant message; the client gets `done`. Verify with the API docs (load the `claude-api` skill) that replaying an assistant turn without its thinking block is accepted; if not, drop the partial text instead. Usage for a stopped call is partial (whatever the stream reported); record what's available.
-5. **Key check:** a route (e.g. `POST /api/key/check` with the `x-anthropic-key` header) that makes a free call (e.g. list models) and returns ok or 401.
+5. **Key check:** built, then removed with the Agent SDK switch (no key in the browser).
 6. **Delete a goal:** `DELETE /api/studies/:id` (cascades). Reject with 409 while a turn is running in it.
 7. **Rename a project:** `PATCH /api/projects/:id { name }`.
 8. **Project list counts:** `GET /api/projects` adds `goalCount` and `fileCount` per project.

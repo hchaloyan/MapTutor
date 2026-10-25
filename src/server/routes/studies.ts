@@ -1,8 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, apiKey } from '../core/anthropic'
+import { AgentError } from '../core/agent'
 import { httpError } from '../core/http'
+import { deleteStudySessions } from '../core/sessions'
 import { usageByModel } from '../core/usage'
 import { isAppText } from '../tutor/context'
 import { weakAncestors } from '../tutor/graph'
@@ -10,7 +11,8 @@ import { loadGraph } from '../tutor/plan'
 import { type Summarize, summarizeNew } from '../tutor/teach'
 import { probeStrands } from '../tutor/quiz'
 import { type Phase, TOOLS, type ToolCtx } from '../tutor/tools'
-import { appendUserMessage, clearPending, type Emit, runTurn, type StreamMessage } from '../tutor/loop'
+import type { Block as Prompt, RunHop } from '../tutor/engine'
+import { appendUserMessage, clearPending, type Emit, resultText, retryPrompt, runTurn } from '../tutor/loop'
 
 type Block = Anthropic.Beta.BetaContentBlock | Anthropic.Beta.BetaContentBlockParam
 type Row = { id: string; node_id: string | null; role: 'user' | 'assistant'; content: string; pending: number; created_at: number }
@@ -50,14 +52,14 @@ function threadView(db: DatabaseSync, studyId: string, nodeId: string | null): T
       const tool = clientTool(b.name)
       const result = results.get(b.id)
       if (tool?.kind !== 'client' || (!r.pending && (!result || result.is_error))) return []
-      const answer = result && typeof result.content === 'string' ? JSON.parse(result.content) : null
+      const answer = result ? JSON.parse(resultText(result)) : null
       return [{ type: 'card', toolUseId: b.id, name: b.name, input: tool.card(b.input, ctx, !!answer), answer, pending: r.pending === 1, createdAt }]
     }),
   )
 }
 
-export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; streamMessage: StreamMessage; summarize: Summarize }) {
-  const { db, streamMessage, summarize } = opts
+export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; runHop: RunHop; summarize: Summarize }) {
+  const { db, runHop, summarize } = opts
   // One turn per study, since focus_node can move a turn into another thread. Stop aborts the controller.
   // ponytail: in-memory lock; holds only while one server process owns the database
   const running = new Map<string, AbortController>()
@@ -75,7 +77,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       .get(studyId, nodeId) as { role: 'user' | 'assistant' } | undefined
 
   /** Streams one turn. Summaries come after `done` and the lock's release, so they never hold up the user. */
-  async function streamTurn(reply: FastifyReply, turn: ReturnType<typeof lock>, studyId: string, nodeId: string | null, key: string) {
+  async function streamTurn(reply: FastifyReply, turn: ReturnType<typeof lock>, studyId: string, nodeId: string | null, prompt: Prompt[] | null) {
     reply.hijack()
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     // A closed tab doesn't stop the turn: state stays consistent and the thread shows the reply on reload.
@@ -83,16 +85,15 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       if (!reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
     try {
-      await runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit, signal: turn.signal })
+      await runTurn({ db, studyId, nodeId, prompt, runHop, emit, signal: turn.signal })
     } catch (err) {
-      const mapped = anthropicError(err)
-      if (!mapped) app.log.error(err)
-      emit('error', { message: mapped?.message ?? 'Something went wrong on the server.' })
+      if (!(err instanceof AgentError)) app.log.error(err)
+      emit('error', { message: err instanceof AgentError ? err.message : 'Something went wrong on the server.' })
       emit('done', { awaiting: false })
     } finally {
       turn.release()
       // A failed summary is retried after the next turn.
-      await summarizeNew(db, studyId, key, summarize).catch(err => app.log.error(err))
+      await summarizeNew(db, studyId, summarize).catch(err => app.log.error(err))
       reply.raw.end()
     }
   }
@@ -108,6 +109,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     requireStudy(db, req.params.id)
     const turn = lock(req.params.id)
     try {
+      deleteStudySessions(db, [req.params.id])
       db.prepare('DELETE FROM studies WHERE id = ?').run(req.params.id)
     } finally {
       turn.release()
@@ -148,7 +150,6 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       },
     },
     async (req, reply) => {
-      const key = apiKey(req)
       const studyId = req.params.id
       const { phase } = requireStudy(db, studyId)
       const nodeId = req.body.nodeId || null
@@ -162,8 +163,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
         throw httpError(409, 'Answer the card first.')
       }
       if (nodeId) db.prepare('UPDATE studies SET focus_node_id = ? WHERE id = ?').run(nodeId, studyId)
-      appendUserMessage(db, studyId, nodeId, [{ type: 'text', text }])
-      return streamTurn(reply, turn, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, [{ type: 'text', text }])
     },
   )
 
@@ -172,7 +172,6 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     '/api/studies/:id/retry',
     { schema: { body: { type: 'object', properties: { nodeId: { type: 'string' } } } } },
     async (req, reply) => {
-      const key = apiKey(req)
       const studyId = req.params.id
       requireStudy(db, studyId)
       const nodeId = req.body?.nodeId || null
@@ -182,7 +181,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
         turn.release()
         throw httpError(409, 'Nothing to retry.')
       }
-      return streamTurn(reply, turn, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, retryPrompt(db, studyId, nodeId))
     },
   )
 
@@ -191,7 +190,6 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     '/api/studies/:id/open',
     { schema: { body: { type: 'object', required: ['nodeId'], properties: { nodeId: { type: 'string', minLength: 1 } } } } },
     async (req, reply) => {
-      const key = apiKey(req)
       const studyId = req.params.id
       const { phase } = requireStudy(db, studyId)
       const { nodeId } = req.body
@@ -201,8 +199,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       const turn = lock(studyId)
       const { label } = db.prepare('SELECT label FROM nodes WHERE study_id = ? AND id = ?').get(studyId, nodeId) as { label: string }
       db.prepare('UPDATE studies SET focus_node_id = ? WHERE id = ?').run(nodeId, studyId)
-      appendUserMessage(db, studyId, nodeId, [{ type: 'text', text: `[App: The user opened "${label}". Teach it now.]` }])
-      return streamTurn(reply, turn, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, [{ type: 'text', text: `[App: The user opened "${label}". Teach it now.]` }])
     },
   )
 
@@ -214,7 +211,6 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       },
     },
     async (req, reply) => {
-      const key = apiKey(req)
       const studyId = req.params.id
       requireStudy(db, studyId)
       const pending = (db.prepare('SELECT id, node_id, content FROM messages WHERE study_id = ? AND pending = 1').all(studyId) as Row[])
@@ -229,7 +225,7 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       const turn = lock(studyId)
       clearPending(db, pending.id)
       appendUserMessage(db, studyId, nodeId, [{ type: 'tool_result', tool_use_id: toolUse.id, content: result.content }])
-      return streamTurn(reply, turn, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, null)
     },
   )
 }

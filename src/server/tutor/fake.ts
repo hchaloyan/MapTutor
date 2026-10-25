@@ -1,16 +1,16 @@
-import Anthropic from '@anthropic-ai/sdk'
-import type { CheckKey } from '../core/anthropic'
-import { httpError } from '../core/http'
+import type Anthropic from '@anthropic-ai/sdk'
+import { AgentError } from '../core/agent'
 import type { HtmlToMarkdown } from '../routes/files'
-import type { MessageStreamParams } from './context'
-import type { StreamMessage } from './loop'
+import { resultText } from './loop'
+import { type SimModel, simEngine } from './sim'
 import type { Summarize } from './teach'
 
 type Block = { type: string; text?: string; id?: string; name?: string; tool_use_id?: string; content?: unknown; is_error?: boolean }
 type Reply = { text: string; tool?: { name: string; input: unknown }; searching?: boolean }
+type Messages = Anthropic.Beta.BetaMessageParam[]
 
-const blocksOf = (m: MessageStreamParams['messages'][number]): Block[] =>
-  typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : (m.content as Block[])
+const blocksOf = (m: Messages[number]): Block[] => (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : (m.content as Block[]))
+const isApp = (b: Block) => b.type === 'text' && (b.text?.startsWith('<study_state>') || b.text?.startsWith('[App:'))
 
 const options = (texts: string[]) => texts.map((text, i) => ({ id: 'abcd'[i], text }))
 
@@ -63,12 +63,13 @@ const lesson = (label: string) =>
     'Try the question below.',
   ].join('\n\n')
 
-/** Picks the reply from the request's last message and its newest study state. The goal itself is ignored. */
-function script(params: MessageStreamParams): Reply {
-  const { messages } = params
+/** Picks the reply from the thread's last message and its newest study state. The goal itself is ignored. */
+function script(messages: Messages): Reply {
   const last = blocksOf(messages.at(-1)!)
+  // A tool result carries the newest state inside its content.
   const state = messages
     .flatMap(blocksOf)
+    .flatMap(b => (b.type === 'tool_result' && Array.isArray(b.content) ? (b.content as Block[]) : [b]))
     .findLast(b => b.type === 'text' && b.text?.startsWith('<study_state>'))?.text ?? ''
   const phase = /^Phase: (\w+)/m.exec(state)?.[1]
   const node = /^Thread: node (\S+)/m.exec(state)?.[1]
@@ -81,8 +82,9 @@ function script(params: MessageStreamParams): Reply {
   const result = last.find(b => b.type === 'tool_result')
   if (result) {
     const name = toolUses.find(b => b.id === result.tool_use_id)?.name
-    if (result.is_error) return { text: `That didn't work: ${String(result.content)}` }
-    const json = () => JSON.parse(String(result.content)) // client tools answer in JSON; server tools in plain text
+    const content = resultText(result as Anthropic.Beta.BetaToolResultBlockParam)
+    if (result.is_error) return { text: `That didn't work: ${content}` }
+    const json = () => JSON.parse(content) // client tools answer in JSON; server tools in plain text
     if (name === 'ask_user_question') return { text: '', tool: { name: 'set_goal_title', input: { title: 'Ace the calculus midterm' } } }
     if (name === 'set_goal_title') {
       return {
@@ -109,7 +111,9 @@ function script(params: MessageStreamParams): Reply {
   if (node && last.some(b => b.type === 'text' && b.text?.startsWith('[App:'))) {
     return { text: lesson(labelOf(node)), tool: { name: 'quiz', input: check(node, labelOf(node)) } }
   }
-  const said = last.find(b => b.type === 'text' && !b.text?.startsWith('<study_state>') && !b.text?.startsWith('[App:'))?.text
+  // What the user typed since the tutor last spoke; a Retry adds an app note after it.
+  const since = messages.slice(messages.findLastIndex(m => m.role === 'assistant') + 1)
+  const said = since.flatMap(blocksOf).findLast(b => b.type === 'text' && !isApp(b))?.text
   if (said && phase === 'probe' && !toolUses.some(b => b.name === 'ask_user_question')) {
     return {
       text: "Happy to help. First, what's the aim?",
@@ -129,16 +133,15 @@ function script(params: MessageStreamParams): Reply {
   return { text: said ? `You said: ${said}` : "I'm here. What would you like to do next?" }
 }
 
-/** A scripted tutor for building and testing the frontend without calling Claude. */
-export function fakeTutor({ delayMs }: { delayMs: number }) {
+/** The scripted model: thinking, then the reply in chunks. Stop rejects the way an aborted stream does. */
+export function fakeModel({ delayMs }: { delayMs: number }): SimModel {
   const failed = new Set<string>()
-  const streamMessage: StreamMessage = async (params, _key, onText, opts = {}) => {
-    const { signal } = opts
+  return async (messages, onText, { onStatus, signal }) => {
     // A user message containing [fail] errors once, so the error line and Retry can be tried.
-    const said = blocksOf(params.messages.at(-1)!).find(b => b.type === 'text' && b.text?.includes('[fail]'))?.text
+    const said = blocksOf(messages.at(-1)!).find(b => b.type === 'text' && b.text?.includes('[fail]'))?.text
     if (said && !failed.has(said)) {
       failed.add(said)
-      throw new Anthropic.InternalServerError(529, { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 'Overloaded', new Headers())
+      throw new AgentError('Claude is overloaded right now. Try again in a moment.')
     }
     const wait = (ms: number) =>
       new Promise<void>((resolve, reject) => {
@@ -146,11 +149,11 @@ export function fakeTutor({ delayMs }: { delayMs: number }) {
         const timer = setTimeout(resolve, ms)
         signal?.addEventListener('abort', () => (clearTimeout(timer), reject(new Error('Request was aborted.'))), { once: true })
       })
-    const reply = script(params)
-    opts.onStatus?.('thinking')
+    const reply = script(messages)
+    onStatus('thinking')
     await wait(delayMs)
     if (reply.searching) {
-      opts.onStatus?.('searching')
+      onStatus('searching')
       await wait(delayMs)
     }
     for (const chunk of reply.text.match(/(?:\S+\s*){1,4}|\s+/g) ?? []) {
@@ -172,10 +175,11 @@ export function fakeTutor({ delayMs }: { delayMs: number }) {
       usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     } as unknown as Anthropic.Beta.BetaMessage
   }
+}
+
+/** A scripted tutor for building and testing the frontend without calling Claude. */
+export function fakeTutor({ delayMs }: { delayMs: number }) {
   const summarize: Summarize = async transcript => `Fake summary: ${transcript.split('\n')[0]}`
   const htmlToMarkdown: HtmlToMarkdown = async html => html.replace(/<[^>]*>/g, '')
-  const checkKey: CheckKey = async key => {
-    if (!key.startsWith('sk-ant-')) throw httpError(401, 'Your Anthropic API key was rejected.')
-  }
-  return { streamMessage, summarize, htmlToMarkdown, checkKey }
+  return { runHop: simEngine(fakeModel({ delayMs })), summarize, htmlToMarkdown }
 }

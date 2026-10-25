@@ -1,10 +1,9 @@
-import type Anthropic from '@anthropic-ai/sdk'
 import { expect, test } from 'vitest'
 import { buildApp } from '../app'
 import { studyStateText } from './context'
 import { LOCAL_USER_ID, openDb } from '../core/db'
 import { probeStrands, quizTool } from './quiz'
-import type { StreamMessage } from './loop'
+import { scripted } from './scripted'
 
 const item = (id: string, correct: string, extra: object = {}) => ({
   id,
@@ -111,18 +110,16 @@ test('end to end: SSE card and thread view never carry the answer before it is g
     { content: [{ type: 'tool_use', id: 'tu_1', name: 'quiz', input: QUIZ }], stop_reason: 'tool_use' },
     { content: [{ type: 'text', text: 'Nice.' }], stop_reason: 'end_turn' },
   ]
-  const streamMessage: StreamMessage = async () => replies.shift() as unknown as Anthropic.Beta.BetaMessage
-  const app = buildApp({ db: openDb(':memory:'), streamMessage })
+  const app = buildApp({ db: openDb(':memory:'), runHop: scripted(replies).runHop })
   const project = (await app.inject({ method: 'POST', url: '/api/projects', payload: { name: 'Calc' } })).json()
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'midterm' } })).json()
-  const headers = { 'x-anthropic-key': 'sk-test' }
-  const sse = await app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, headers, payload: { text: 'quiz me' } })
+  const sse = await app.inject({ method: 'POST', url: `/api/studies/${study.id}/messages`, payload: { text: 'quiz me' } })
   const thread = async () => (await app.inject(`/api/studies/${study.id}/thread`)).json()
   for (const leaked of ['correctOptionId', 'explanation', 'Because q1.', 'arithmetic']) {
     expect(sse.payload).not.toContain(leaked)
     expect(JSON.stringify(await thread())).not.toContain(leaked)
   }
-  await app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, headers, payload: { toolUseId: 'tu_1', answer: { choices: { q1: 'q1a', q2: 'q2b' } } } })
+  await app.inject({ method: 'POST', url: `/api/studies/${study.id}/tool-results`, payload: { toolUseId: 'tu_1', answer: { choices: { q1: 'q1a', q2: 'q2b' } } } })
   const card = (await thread()).find((i: { type: string }) => i.type === 'card')
   expect(card.input.items[0]).toMatchObject({ correctOptionId: 'q1a', explanation: 'Because q1.' })
   expect(card.answer.results.map((r: { correct: boolean }) => r.correct)).toEqual([true, true])

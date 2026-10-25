@@ -1,9 +1,8 @@
 import { expect, test } from 'vitest'
 import { buildApp } from '../app'
 import { openDb } from '../core/db'
-import { fakeTutor } from './fake'
+import { fakeModel, fakeTutor } from './fake'
 
-const KEY = { 'x-anthropic-key': 'sk-ant-fake' }
 type Event = { event: string; data: Record<string, any> }
 
 const events = (payload: string): Event[] =>
@@ -18,7 +17,7 @@ async function setup() {
   const study = (await app.inject({ method: 'POST', url: `/api/projects/${project.id}/studies`, payload: { goal: 'help me study for the midterm' } })).json()
   const seen: Event[] = []
   const post = async (path: string, payload: object) => {
-    const res = await app.inject({ method: 'POST', url: `/api/studies/${study.id}/${path}`, headers: KEY, payload })
+    const res = await app.inject({ method: 'POST', url: `/api/studies/${study.id}/${path}`, payload })
     expect(res.statusCode).toBe(200)
     const list = events(res.payload)
     expect(list.filter(e => e.event === 'done')).toHaveLength(1)
@@ -86,30 +85,21 @@ test('a wrong quiz-check answer gets the same question again', async () => {
   expect(wrong.input.items[0].prompt).toBe(c.input.items[0].prompt)
 })
 
-test('the fake key check accepts sk-ant- keys only', async () => {
-  const { app } = await setup()
-  const check = (key: string) => app.inject({ method: 'POST', url: '/api/key/check', headers: { 'x-anthropic-key': key } })
-  expect((await check('sk-ant-abc')).statusCode).toBe(204)
-  const bad = await check('hello')
-  expect(bad.statusCode).toBe(401)
-  expect(bad.json().message).toBe('Your Anthropic API key was rejected.')
-})
-
 test('the fake tutor streams in chunks and honours Stop', async () => {
-  const { streamMessage } = fakeTutor({ delayMs: 40 })
-  const params = {
-    messages: [{ role: 'user', content: [{ type: 'text', text: 'hello there, how are you today' }, { type: 'text', text: '<study_state>\nPhase: teach\nThread: main\n</study_state>' }] }],
-  } as unknown as Parameters<typeof streamMessage>[0]
+  const model = fakeModel({ delayMs: 40 })
+  const messages = [
+    { role: 'user', content: [{ type: 'text', text: 'hello there, how are you today' }, { type: 'text', text: '<study_state>\nPhase: teach\nThread: main\n</study_state>' }] },
+  ] as Parameters<typeof model>[0]
   const deltas: string[] = []
   const statuses: string[] = []
-  const message = await streamMessage(params, 'sk-ant-x', d => deltas.push(d), { onStatus: s => statuses.push(s) })
+  const message = await model(messages, d => deltas.push(d), { onStatus: s => statuses.push(s) })
   expect(statuses).toEqual(['thinking'])
   expect(deltas.join('')).toBe('You said: hello there, how are you today')
   expect(deltas.length).toBeGreaterThan(1)
   expect(message).toMatchObject({ model: 'fake-tutor', stop_reason: 'end_turn', content: [{ type: 'text', text: 'You said: hello there, how are you today' }] })
 
   const controller = new AbortController()
-  const stopped = streamMessage(params, 'sk-ant-x', () => controller.abort(), { signal: controller.signal })
+  const stopped = model(messages, () => controller.abort(), { onStatus: () => {}, signal: controller.signal })
   await expect(stopped).rejects.toThrow()
 })
 
@@ -117,7 +107,7 @@ test('a message containing [fail] errors once, so Retry can be tried for free', 
   const t = await setup()
   const first = await t.post('messages', { text: 'hello [fail]' })
   expect(first.map(e => e.event)).toEqual(['error', 'done'])
-  expect(first[0].data.message).toBe('Anthropic is overloaded right now. Try again in a moment.')
+  expect(first[0].data.message).toBe('Claude is overloaded right now. Try again in a moment.')
   const retried = await t.post('retry', {})
   expect(retried.filter(e => e.event === 'card')).toHaveLength(1)
 })
