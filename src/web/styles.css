@@ -315,6 +315,47 @@ a {
   padding: 16px 18px;
   z-index: 20;
 }
+.usage-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 300px;
+  padding: 16px 18px;
+  z-index: 20;
+  font-size: 13px;
+}
+.usage-panel h2 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 800;
+}
+.usage-total {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+.usage-model {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1.5px solid var(--divider);
+}
+.usage-model b {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 800;
+}
+.usage-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.usage-grid span:nth-child(odd) {
+  color: var(--muted);
+}
+.usage-grid span:nth-child(even) {
+  text-align: right;
+}
 .key-panel-head {
   display: flex;
   align-items: center;
@@ -741,6 +782,26 @@ body.resizing {
   position: relative;
   overflow: hidden;
   min-height: 0;
+}
+.confetti {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+}
+.confetti i {
+  position: absolute;
+  height: 12px;
+  margin: -6px 0 0 -4px;
+  border-radius: 2px;
+}
+.goal-complete {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.goal-complete-title {
+  font-size: 17px;
+  font-weight: 800;
 }
 .chat-pane {
   flex: 1;
@@ -1374,8 +1435,6 @@ button.menu-row:hover:not(:disabled) {
   stroke: #fff;
   stroke-width: 4;
   stroke-linecap: round;
-  stroke-dasharray: 0.22 2;
-  stroke-dashoffset: 0.22;
 }
 @media (prefers-reduced-motion: reduce) {
   .map-ripple {

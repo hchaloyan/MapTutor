@@ -14,15 +14,17 @@ import {
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { Study, StudyNode } from '../lib/api'
 import { STATES } from '../lib/format'
-import { boxSize, labelSize, layout, layoutKey, lightTimings, radius } from '../lib/graph'
+import { boxSize, labelSize, layout, layoutKey, lightTimings, lineLength, radius } from '../lib/graph'
 
 type CircleData = { node: StudyNode; open: boolean; taught: boolean; clickable: boolean }
 type CircleNode = Node<CircleData, 'circle'>
-type Timing = { delay: number; cycle: number }
+type Timing = { delay: number; duration: number; cycle: number; light: number }
 
 const PAD = 12 // box padding around the circle (see boxSize)
 const RING = 9 // root ring distance outside the circle
-const STEP = 0.45
+const SPEED = 250 // the light toward the open node, px per second at zoom 1
+const LIGHT = 20 // its length in px at zoom 1
+const TIP = 8 // a line stops this far into its arrowhead
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 const sourceBottom = (kind: StudyNode['kind']) => (kind === 'root' ? PAD - RING - 1.5 : PAD)
 
@@ -83,23 +85,25 @@ function Line({ source, target, sourceX, sourceY, targetX, targetY, sourcePositi
   const timing = useContext(LightContext).get(`${source}→${target}`)
   const light = useRef<SVGPathElement>(null)
   // Stop the line inside the arrowhead so its round cap never pokes past the tip.
-  const [d] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY: targetY - 8, targetPosition, curvature: 0.35 })
+  const [d] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY: targetY - TIP, targetPosition, curvature: 0.35 })
   const arrow = `M ${targetX} ${targetY} L ${targetX - 7} ${targetY - 11} L ${targetX + 7} ${targetY - 11} Z`
 
+  // The light enters at the start and runs on past the end, where the arrowhead (drawn above it) covers it.
   useEffect(() => {
     if (!timing || !light.current || reducedMotion()) return
+    const end = -light.current.getTotalLength()
     const run = light.current.animate(
-      [{ strokeDashoffset: 0.22 }, { strokeDashoffset: -1, offset: STEP / timing.cycle }, { strokeDashoffset: -1 }],
+      [{ strokeDashoffset: timing.light }, { strokeDashoffset: end, offset: timing.duration / timing.cycle }, { strokeDashoffset: end }],
       { duration: timing.cycle * 1000, delay: timing.delay * 1000, iterations: Infinity },
     )
     return () => run.cancel()
-  }, [timing?.delay, timing?.cycle])
+  }, [timing?.delay, timing?.duration, timing?.cycle, timing?.light])
 
   return (
     <g>
       <path className="map-line" d={d} />
+      {timing && <path ref={light} className="map-light" d={d} style={{ strokeDasharray: `${timing.light} 100000`, strokeDashoffset: timing.light }} />}
       <path className="map-arrow" d={arrow} />
-      {timing && <path ref={light} className="map-light" d={d} pathLength={1} />}
     </g>
   )
 }
@@ -199,7 +203,22 @@ function Graph({ study, openId, onOpen, clickable }: { study: Study; openId: str
     handles: handles(n.kind),
   }))
   const edges: Edge[] = study.edges.map(e => ({ id: `${e.from}→${e.to}`, source: e.from, target: e.to, type: 'line' }))
-  const timings = useMemo(() => (hover ? lightTimings(study.edges, hover.id) : new Map<string, Timing>()), [hover?.id, key]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Each line's length from the layout and the handle points, as React Flow draws it.
+  const lengths = useMemo(() => {
+    const point = (id: string, type: 'source' | 'target') => {
+      const p = positions.get(id) ?? { x: 0, y: 0 }
+      const h = handles(study.nodes.find(n => n.id === id)!.kind).find(h => h.type === type)!
+      return { x: p.x + h.x, y: p.y + h.y }
+    }
+    return new Map(study.edges.map(e => {
+      const [s, t] = [point(e.from, 'source'), point(e.to, 'target')]
+      return [`${e.from}→${e.to}`, lineLength(s.x, s.y, t.x, t.y - TIP)]
+    }))
+  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  const timings = useMemo(
+    () => (openId ? lightTimings(study.edges, openId, lengths, SPEED, LIGHT) : new Map<string, Timing>()),
+    [openId, lengths], // eslint-disable-line react-hooks/exhaustive-deps
+  )
   const hovered = study.nodes.find(n => n.id === hover?.id)
 
   return (
@@ -218,7 +237,8 @@ function Graph({ study, openId, onOpen, clickable }: { study: Study; openId: str
           nodesConnectable={false}
           elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
-          onMoveStart={() => setHover(null)}
+          // Only a real pan or zoom hides the hover card; `onMoveStart` also fires on a plain click.
+          onMove={() => setHover(null)}
           onNodeClick={(_e, n) => clickable && onOpen(n.id)}
           onNodeMouseEnter={(e, n) => {
             const circle = (e.currentTarget as HTMLElement).querySelector('.map-circle')!.getBoundingClientRect()

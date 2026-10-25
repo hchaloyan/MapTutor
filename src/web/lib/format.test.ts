@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { clampSplit, countLabel, fileBadge, formatBytes, goalName, masterySegments, phaseLabel, usedLabel } from './format'
+import { clampSplit, countLabel, fileBadge, formatBytes, formatTokens, goalName, masterySegments, modelName, phaseLabel, usageTotals, usedLabel } from './format'
 
 test('count labels', () => {
   expect([countLabel(0, 'file'), countLabel(1, 'goal'), countLabel(3, 'goal'), countLabel(0, 'goal')]).toEqual(['no files', '1 goal', '3 goals', 'no goals'])
@@ -46,4 +46,24 @@ test('used label', () => {
 
 test('split clamps to 25–75', () => {
   expect([clampSplit(10), clampSplit(50), clampSplit(90)]).toEqual([25, 50, 75])
+})
+
+test('model names come from the model ID', () => {
+  expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+  expect(modelName('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+  expect(modelName('claude-fable-5-1')).toBe('Fable 5.1')
+  expect(modelName('gpt-x')).toBe('gpt-x')
+  expect(modelName('claude-opus')).toBe('claude-opus')
+})
+
+test('token figures round to k and M', () => {
+  expect([0, 611, 999, 1000, 9412, 48210, 999_949, 999_950, 1_204_388].map(formatTokens)).toEqual([
+    '0', '611', '999', '1.0k', '9.4k', '48.2k', '999.9k', '1.00M', '1.20M',
+  ])
+})
+
+test('usage totals add every token kind and searches, and are zero when empty', () => {
+  const row = { model: 'claude-opus-5-5', inputTokens: 10, outputTokens: 20, cacheReadTokens: 30, cacheWriteTokens: 40, webSearches: 2 }
+  expect(usageTotals([row, { ...row, model: 'claude-haiku-5-5', webSearches: 0 }])).toEqual({ tokens: 200, searches: 2 })
+  expect(usageTotals([])).toEqual({ tokens: 0, searches: 0 })
 })

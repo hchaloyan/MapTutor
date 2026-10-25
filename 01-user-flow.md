@@ -9,21 +9,22 @@
 
 ## Screens
 
-1. **Projects list.** Create or open a project.
-2. **Project page.**
-   - Context files: upload or delete PDFs, slides, `.md`/`.txt`, images, and URLs.
-   - Studies list, each showing its goal, phase, and a mastery bar (count of nodes per state).
-   - A "New study" prompt box. This is where the user writes something like "help me study for the midterm".
-3. **Study view.** A split pane.
-   - **Left (~55%): the graph.** Nodes are colored by state, and the current node pulses. Hovering a node shows its summary and its quiz evidence. Clicking a node opens its thread.
-   - **Right: the chat** for the selected thread. Quiz, goal, and approval cards render inline.
-   - **Header:** the study goal, a phase indicator (Probe → Plan → Teach), and the active thread's name.
+The UI says **goal** for what the code and these docs call a study. The visual design is in [the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md).
 
-Before the graph exists, the left pane shows a placeholder listing the probe strands as they get explored.
+1. **Projects screen.** A sidebar lists the projects (**+ New** creates one); the open project's page fills the rest.
+   - Goals list: each goal's title (the tutor sets a short one; until then, the typed goal), its phase, and a mastery bar (count of nodes per state).
+   - An "Add a new goal" box. This is where the user writes something like "help me study for the midterm"; **Start** opens the goal and sends the text as the first message.
+   - Context files: upload or delete PDFs, slides, `.md`/`.txt`, images, and links (with Refresh).
+2. **Goal screen.** A split pane, 50/50 at first and draggable.
+   - **Left: the map.** Nodes are colored by state, and the node being taught ripples. Hovering a node shows its description, summary, and quiz evidence. Clicking a node opens its thread, and a light runs along the lines into it from its prerequisites.
+   - **Right: the chat** for the selected thread. Quiz, question, and plan cards render inline.
+   - **Top bar:** back to the project, the goal's title, the phase steps (Probe → Plan → Teach → Done), **Usage**, **API key**, and the theme toggle. The chat header names the open thread.
+
+Before the graph exists, the left pane shows the probe strands as they get explored.
 
 ## Phases
 
-A study moves through `probe → plan → teach`. The phase is stored on the study, and the server enforces it: teaching tools are rejected before the plan is approved.
+A study moves through `probe → plan → teach → done`. The phase is stored on the study, and the server enforces it: teaching tools are rejected before the plan is approved.
 
 ### 1. Probe
 
@@ -42,8 +43,8 @@ All probe messages live in the study's main thread (`nodeId = null`).
 1. **Scoping search.** The tutor runs a web search to check the field's core concepts and real first principles (see [02-agent.md](02-agent.md#verification)).
 2. **Graph proposal.** The tutor calls `propose_graph` with its approach in prose and the graph. The approach shows above the approval card, and the graph renders with initial states taken from the probe evidence (see [03-graph.md](03-graph.md#initial-states)).
 3. **Approval.** An approval card appears in chat:
-   - **Approve** moves the study to Teach.
-   - **Give feedback** lets the user type changes. The tutor revises and calls `propose_graph` again, which replaces the graph.
+   - **Approve plan** moves the study to Teach.
+   - **Suggest changes** lets the user type changes. The tutor revises and calls `propose_graph` again, which replaces the graph.
 
 ### 3. Teach
 
@@ -52,6 +53,6 @@ All probe messages live in the study's main thread (`nodeId = null`).
   2. **Establish:** state it plainly if it's an unconditional truth, or derive it with a motivated step, Socratic or expository.
   3. **Connect:** make the dependency edge explicit.
   4. **Quiz-check:** `quiz` items tagged with the `nodeId`. The result drives the node's state.
-- **Free navigation.** Clicking any node opens its thread. If any ancestor isn't Known, a warning banner lists those ancestors with two buttons: **Continue anyway** and **Go to <ancestor>**.
+- **Free navigation.** Clicking any node opens its thread (node threads exist only after approval). If any ancestor isn't Known, a warning banner lists those ancestors with two buttons: **Go to <ancestor>** and **Continue anyway**. A node whose thread is empty starts its lesson by itself, with no visible user message.
 - **Revisiting.** A Known node can be reopened at any time. Its thread continues where it left off, and the tutor can review the node or quiz it again.
-- **Done.** The study is complete when the goal node is Known. Every node stays reopenable after that.
+- **Done.** The study is complete when the goal node is Known: a burst of confetti over the map and a "Goal complete" card. Every node stays reopenable after that.

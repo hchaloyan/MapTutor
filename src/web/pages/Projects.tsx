@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ProjectPage } from '../components/ProjectPage'
 import { Sidebar } from '../components/Sidebar'
 import { TopBar } from '../components/TopBar'
+import { UsageButton } from '../components/Usage'
 import { api, type Project, type ProjectSummary } from '../lib/api'
 import { navigate } from '../lib/router'
 
@@ -44,7 +45,10 @@ export function Projects({ projectId }: { projectId: string | null }) {
 
   return (
     <div className="app">
-      <TopBar left={<span className="wordmark">MapTutor</span>} />
+      <TopBar
+        left={<span className="wordmark">MapTutor</span>}
+        right={project && project.id === projectId && <UsageButton key={project.id} usage={project.usage} scope="project" />}
+      />
       <main className="page">
         <Sidebar projects={projects ?? []} openId={projectId} creating={creating} setCreating={setCreating} onCreate={create} />
         {error ? (

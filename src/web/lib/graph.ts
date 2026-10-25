@@ -26,24 +26,37 @@ export function layout(nodes: { id: string; kind: Kind }[], edges: Edge[]) {
 export const layoutKey = (nodes: { id: string }[], edges: Edge[]) =>
   JSON.stringify([nodes.map(n => n.id).sort(), edges.map(e => `${e.from}→${e.to}`).sort()])
 
-const STEP = 0.45
+/** Length of a map line: React Flow's bottom-to-top bezier (curvature 0.35), sampled. */
+export function lineLength(sx: number, sy: number, tx: number, ty: number) {
+  const c = ty >= sy ? 0.5 * (ty - sy) : 0.35 * 25 * Math.sqrt(sy - ty)
+  const at = (t: number, a: number, b: number, d: number, e: number) => (1 - t) ** 3 * a + 3 * (1 - t) ** 2 * t * b + 3 * (1 - t) * t ** 2 * d + t ** 3 * e
+  let length = 0
+  for (let i = 1, x = sx, y = sy; i <= 64; i++) {
+    const t = i / 64
+    const [nx, ny] = [at(t, sx, sx, tx, tx), at(t, sy, sy + c, ty - c, ty)]
+    length += Math.hypot(nx - x, ny - y)
+    ;[x, y] = [nx, ny]
+  }
+  return length
+}
 
 /**
- * The traveling light on hover: every line in the hovered node's ancestor subgraph, timed as a relay so
- * every branch reaches the hovered node together. A line ending k steps (longest path) away starts at (L − 1 − k) × STEP.
+ * The traveling light toward the open node: every line in its ancestor subgraph at the same `speed`, timed as a
+ * relay so every branch reaches the open node together. `lengths` are keyed `from→to`; seconds out, one shared cycle.
  */
-export function lightTimings(edges: Edge[], hovered: string) {
+export function lightTimings(edges: Edge[], target: string, lengths: Map<string, number>, speed: number, light: number) {
   const into = new Map<string, Edge[]>()
   for (const e of edges) into.set(e.to, [...(into.get(e.to) ?? []), e])
-  // Longest distance (in lines) from each ancestor down to the hovered node.
-  const dist = new Map<string, number>([[hovered, 0]])
+  const len = (e: Edge) => lengths.get(`${e.from}→${e.to}`) ?? 0
+  // Longest distance (along the lines) from each ancestor down to the open node.
+  const dist = new Map<string, number>([[target, 0]])
   const ancestorEdges: Edge[] = []
-  const queue = [hovered]
+  const queue = [target]
   while (queue.length) {
     const node = queue.shift()!
     for (const e of into.get(node) ?? []) {
       if (!ancestorEdges.includes(e)) ancestorEdges.push(e)
-      const d = dist.get(node)! + 1
+      const d = dist.get(node)! + len(e)
       if (d > (dist.get(e.from) ?? -1)) {
         dist.set(e.from, d)
         queue.push(e.from)
@@ -51,9 +64,13 @@ export function lightTimings(edges: Edge[], hovered: string) {
     }
   }
   const longest = Math.max(0, ...ancestorEdges.map(e => dist.get(e.from)!))
-  const round = (s: number) => Math.round(s * 100) / 100
+  const round = (s: number) => Math.round(s * 1000) / 1000
+  // A line's light leaves its start so that its head reaches the end (longest − dist(to)) / speed after the relay starts.
   return new Map(
-    ancestorEdges.map(e => [`${e.from}→${e.to}`, { delay: round((longest - 1 - dist.get(e.to)!) * STEP), cycle: round(longest * STEP) }]),
+    ancestorEdges.map(e => [
+      `${e.from}→${e.to}`,
+      { delay: round((longest - dist.get(e.to)! - len(e)) / speed), duration: round((len(e) + light) / speed), cycle: round((longest + light) / speed), light },
+    ]),
   )
 }
 

@@ -73,9 +73,11 @@ When the user clicks a node `N`:
 1. Collect `ancestors(N)` with a reverse BFS over the edges.
 2. Filter to ancestors whose state is not `known`.
 3. If the list is empty, open the thread.
-4. Otherwise, show a banner: "These prerequisites aren't solid yet: A (missed), B (untested)…". It has two buttons:
+4. Otherwise, the chat switches to `N` and shows a banner in place of the conversation: "These prerequisites aren't solid yet: A (missed), B (untested)." The message box is paused while it shows. It has two buttons:
+   - **Go to <ancestor>** opens the weak ancestor nearest the roots (`weak[0]`; the list is sorted by depth, so that node's own ancestors are all Known).
    - **Continue anyway** opens `N`'s thread. The tutor's context includes the weak ancestors so it can adapt.
-   - **Go to <ancestor>** opens the deepest weak ancestor first.
+
+Either way, a thread with no messages starts its lesson by itself (`POST /api/studies/:id/open`). While a turn is running, a click only switches the view.
 
 ## Next-node selection
 
@@ -87,9 +89,14 @@ The default path, used when the tutor or the user asks "what's next":
 
 ## Layout and rendering
 
+The full visual spec is in [the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md#the-map-graph-pane).
+
 - **Library:** React Flow with dagre, laid out top to bottom. Roots sit at the top and the goal at the bottom.
-- **Re-layout:** only on `propose_graph`. State changes recolor nodes without moving them.
-- **Node card:** a short label and a colored fill. Roots get a distinct border so they read as foundations.
-- **Current node:** a pulsing outline (respecting `prefers-reduced-motion`).
-- **Legend:** a small legend sits in the corner of the pane.
-- **Hover tooltip:** description, summary (if Known), and evidence as "3/4 correct".
+- **Re-layout:** only when the set of nodes or edges changes (a new `propose_graph`). State changes recolor nodes without moving them.
+- **Nodes:** chunky outlined circles in the state color, drawn like stickers, with the label inside. The goal is larger with a thicker outline; roots get an outer ring so they read as foundations.
+- **Lines:** solid curves from a prerequisite's bottom to its dependent's top, with small arrowheads. No dashes.
+- **Node being taught:** soft ripples in its own color (a still halo under `prefers-reduced-motion`).
+- **Open node:** the node whose chat is showing pops out toward you (scaled up, with a soft shadow).
+- **Traveling light:** while a node is open, a light travels along every line into it, relayed so all its prerequisite paths arrive together. Nothing is dimmed.
+- **Legend:** a slim segmented bar with counts per state, bottom left; zoom buttons bottom right.
+- **Hover card:** description, summary (if any), and evidence dots with "3/4 correct".

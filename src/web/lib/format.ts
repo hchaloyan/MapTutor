@@ -1,4 +1,4 @@
-import type { NodeState, Phase } from './api'
+import type { NodeState, Phase, Usage } from './api'
 
 export const countLabel = (n: number, noun: 'goal' | 'file') => (n === 0 ? `no ${noun}s` : `${n} ${noun}${n === 1 ? '' : 's'}`)
 
@@ -31,3 +31,16 @@ export function fileBadge(f: { kind: 'pdf' | 'image' | 'text' | 'url'; name: str
 
 /** The graph pane's share of the goal screen, in percent. */
 export const clampSplit = (pct: number) => Math.min(75, Math.max(25, pct))
+
+/** `claude-opus-5-5` (optionally with a date suffix) → `Opus 5.5`; other IDs as-is. */
+export function modelName(id: string) {
+  const m = /^claude-([a-z]+)-(\d+)-(\d+)(-\d{8})?$/.exec(id)
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id
+}
+
+export const formatTokens = (n: number) => (n < 1000 ? String(n) : n < 999_950 ? `${(n / 1000).toFixed(1)}k` : `${(n / 1e6).toFixed(2)}M`)
+
+export const usageTotals = (usage: Usage) => ({
+  tokens: usage.reduce((sum, u) => sum + u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens, 0),
+  searches: usage.reduce((sum, u) => sum + u.webSearches, 0),
+})

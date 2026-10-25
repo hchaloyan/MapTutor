@@ -34,6 +34,8 @@ export function Chat(props: {
   onKeyLink(): void
   renderCard(card: Card): ReactNode
   banner?: ReactNode
+  /** Drawn after the live reply and any error (the goal-complete card). */
+  after?: ReactNode
 }) {
   const { turn } = props
   const scroller = useRef<HTMLDivElement>(null)
@@ -107,6 +109,7 @@ export function Chat(props: {
               </button>
             </div>
           )}
+          {props.after}
         </div>
       )}
       <div className={`composer${paused ? ' paused' : ''}`}>

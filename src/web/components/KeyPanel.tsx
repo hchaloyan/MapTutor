@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useApp } from '../lib/app'
+import { useApp, useDismiss } from '../lib/app'
 import { checkAndSave, maskKey, removeKey } from '../lib/key'
 import { KeyField } from './KeyField'
 
@@ -8,18 +8,7 @@ export function KeyButton() {
   const app = useApp()
   const ref = useRef<HTMLDivElement>(null)
   const open = app.keyPanelOpen
-
-  useEffect(() => {
-    if (!open) return
-    const outside = (e: PointerEvent) => ref.current && !ref.current.contains(e.target as Node) && app.setKeyPanelOpen(false)
-    const escape = (e: KeyboardEvent) => e.key === 'Escape' && app.setKeyPanelOpen(false)
-    document.addEventListener('pointerdown', outside)
-    document.addEventListener('keydown', escape)
-    return () => {
-      document.removeEventListener('pointerdown', outside)
-      document.removeEventListener('keydown', escape)
-    }
-  }, [open, app])
+  useDismiss(ref, open, () => app.setKeyPanelOpen(false))
 
   return (
     <div ref={ref} className="key-anchor">

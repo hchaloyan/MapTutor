@@ -10,6 +10,7 @@
 ## Frontend
 
 - **App:** React, Vite, and TypeScript.
+- **Type:** Nunito, self-hosted (`@fontsource/nunito`) so the local app works offline.
 - **Graph:** React Flow (`@xyflow/react`) with `dagre` for top-down layout.
 - **Chat rendering:** `react-markdown` with `remark-math`, `rehype-katex`, and `remark-gfm`.
 - **Cards:** custom components for quizzes, goal questions, and plan approval, each rendered from tool calls.
@@ -48,7 +49,7 @@ Size limits: 5 MB per image (the API limit) and 20 MB per project in total, so t
 - **Two prompt-cache breakpoints:** one after the fixed system prompt, and one after the project files. Every turn reuses both, which is the biggest cost lever for BYOK users.
 - **Small per-turn context:** per-node threads and Known-node summaries keep the uncached part small.
 - **Web search** is uncapped; the model decides how much to search, and the usage popover shows the count (see [02-agent.md](02-agent.md#verification)).
-- **Usage display:** show token and search usage per study, taken from the API response's usage fields, so friends can see what they're spending.
+- **Usage display:** a **Usage** popover per goal and per project, taken from the API response's usage fields: total tokens, web searches, and each model's input, output, and cached tokens. Tokens only, no money.
 
 ## Model
 

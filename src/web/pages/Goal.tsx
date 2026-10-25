@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { Chat } from '../components/Chat'
+import { Confetti } from '../components/Confetti'
+import { MasteryBar } from '../components/MasteryBar'
 import { StudyMap } from '../components/Map'
 import { PhaseSteps } from '../components/PhaseSteps'
 import { PlanCard } from '../components/PlanCard'
@@ -9,9 +11,10 @@ import { QuizCard } from '../components/QuizCard'
 import { SplitPane } from '../components/SplitPane'
 import { StrandPanel } from '../components/StrandPanel'
 import { TopBar } from '../components/TopBar'
-import { api, type Card, type NodeState, type Project, type Study, type ThreadItem } from '../lib/api'
+import { UsageButton } from '../components/Usage'
+import { api, type Card, type NodeState, type Phase, type Project, type Study, type ThreadItem } from '../lib/api'
 import { useApp } from '../lib/app'
-import { goalName } from '../lib/format'
+import { goalName, STATES } from '../lib/format'
 import { prereqText } from '../lib/graph'
 import { navigate } from '../lib/router'
 import { postStream } from '../lib/sse'
@@ -30,6 +33,9 @@ export function Goal({ goalId }: { goalId: string }) {
   const [draft, setDraft] = useState('')
   const [queued, setQueued] = useState<string | null>(null)
   const [turnThread, setTurnThread] = useState<string | null | undefined>(undefined) // where the live reply belongs
+  const [burst, setBurst] = useState<{ x: number; y: number } | null>(null)
+  const pane = useRef<HTMLDivElement>(null)
+  const lastPhase = useRef<Phase | null>(null)
   const [banner, setBanner] = useState<{ nodeId: string; weak: { id: string; state: NodeState }[] } | null>(null)
 
   // Refs for callbacks that outlive a render: the open thread, the latest turn, and a guard against double sends.
@@ -184,6 +190,17 @@ export function Goal({ goalId }: { goalId: string }) {
       .catch(err => setError((err as Error).message))
   }, [threadId, loadThread])
 
+  // The goal turning Known while the page is open (teach → done) fires one burst from the goal circle; a reload doesn't.
+  const phase = study?.phase ?? null
+  useEffect(() => {
+    if (lastPhase.current === 'teach' && phase === 'done' && pane.current && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const box = pane.current.getBoundingClientRect()
+      const goal = pane.current.querySelector('.map-node.goal .map-circle')?.getBoundingClientRect()
+      setBurst(goal ? { x: goal.left + goal.width / 2 - box.left, y: goal.top + goal.height / 2 - box.top } : { x: box.width / 2, y: box.height / 2 })
+    }
+    lastPhase.current = phase
+  }, [phase])
+
   if (error) return <div className="first-run error-line">{error}</div>
   if (!study || threadId === undefined) return null
 
@@ -206,16 +223,18 @@ export function Goal({ goalId }: { goalId: string }) {
           </>
         }
         center={<PhaseSteps phase={study.phase} />}
+        right={<UsageButton usage={study.usage} scope="goal" />}
       />
       <main className="page">
         <SplitPane
           left={
-            <div className="graph-pane">
+            <div ref={pane} className="graph-pane">
               {study.nodes.length === 0 ? (
                 <StrandPanel strands={study.strands} />
               ) : (
                 <StudyMap study={study} openId={threadId} clickable={study.phase === 'teach' || study.phase === 'done'} onOpen={openNode} />
               )}
+              {burst && <Confetti origin={burst} onDone={() => setBurst(null)} />}
             </div>
           }
           right={
@@ -232,6 +251,19 @@ export function Goal({ goalId }: { goalId: string }) {
               setDraft={setDraft}
               queued={!!queued}
               composerPaused={shown ? 'Message the tutor…' : pendingCard && !turn.running ? 'Answer the card above to continue' : null}
+              after={
+                study.phase === 'done' &&
+                node?.kind === 'goal' &&
+                !turn.running && (
+                  <div className="card goal-complete">
+                    <div className="goal-complete-title">Goal complete</div>
+                    <div className="muted">
+                      {study.nodes.filter(n => n.state === 'known').length} of {study.nodes.length} known
+                    </div>
+                    <MasteryBar counts={Object.fromEntries(STATES.map(s => [s, study.nodes.filter(n => n.state === s).length])) as Record<NodeState, number>} height={8} />
+                  </div>
+                )
+              }
               banner={
                 shown &&
                 goTo &&

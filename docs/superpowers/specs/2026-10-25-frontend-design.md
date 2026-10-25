@@ -151,7 +151,7 @@ Solid, `ink` 4px, round caps, gentle bezier curves from the bottom of the prereq
 
 ### Hover
 
-- **Traveling light:** hovering a node sends a short white light along every line in its ancestor subgraph, toward the hovered node. It relays: lines nearest the roots run first, the lines into the hovered node run last, and then it starts over immediately (continuous, no pause). About **0.45s per line**. Branches of different lengths are timed so every branch reaches the hovered node together: a line whose end is *k* steps from the hovered node starts at `(L − 1 − k) × 0.45s` in an `L × 0.45s` cycle, where *L* is the longest chain. No glow, no dimming, nothing else changes. Reduced motion: no light **(my call)**.
+- **Traveling light (user, 2026-10-25: on the open node, not on hover):** while a node's chat is open, a short white light runs along every line in its ancestor subgraph, toward that node. It relays: lines nearest the roots run first, the lines into the open node run last, and then it starts over immediately (continuous, no pause). The light is **20px** long and moves at **250px/s** (at zoom 1; it scales with the map), the same speed on every line, so a longer line takes longer (user, 2026-10-25; 0.45s per line ran short lines slower than long ones, and 600px/s was far too fast). Branches of different lengths are timed so every branch reaches the open node together: each line starts when the light on the longest path above it would arrive, and the cycle restarts once the last light passes into the open node. The light slides under the arrowhead at the end of each line. The main chat and a root have no light. No glow, no dimming, nothing else changes. Hovering shows only the hover card. Reduced motion: no light **(my call)**.
 - **Hover card** (soft style: white, no outline, blurred shadow, beside the node **(my call: placement)**): full label (800), description, "What you established" + summary when the node has one, and the quiz evidence as dots (green right, red wrong) + "3/4 correct". The node has no quiz yet → "No quiz yet" **(my call)**.
 
 ### Legend
@@ -272,7 +272,7 @@ Each is small; do them test-first like the earlier components.
 
 - 01-user-flow: graph/chat split is 50/50 and draggable; Goal vocabulary in the UI; projects list is a sidebar.
 - 02-agent: no `hint`; web search uncapped; files-first, teach-inline, opened-node and goal-title rules; `set_goal_title` tool; `status` SSE event; stop, open and retry routes.
-- 03-graph: hover traveling light (no dimming); node visuals above.
+- 03-graph: traveling light toward the open node (no dimming); node visuals above.
 - 04-data-model: drop `quiz_items.hint`, `studies.search_cap`; add `studies.title`.
 - 05-stack: the per-request search cap and its setting are gone; the usage display is tokens only; Nunito.
 - ROADMAP: visual design decided (this doc); add the backend changes above to the frontend components or as a component 7b.

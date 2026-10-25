@@ -1,30 +1,19 @@
-# Handoff: MapTutor, frontend mostly built (component 10 Task 3 next)
+# Handoff: MapTutor, frontend built (components 0–11 done)
 
-You're picking up a build in progress. Read this file first, then [ROADMAP.md](ROADMAP.md), then **[the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md)** and **[the component 10 plan](docs/superpowers/plans/2026-10-25-map.md)**. The plans for 7b, 8 and 9 (same folder) hold each component's rulings. The older design docs (`README.md`, `01`–`05`) only as needed; the frontend design wins where they disagree.
+Read this file first, then [ROADMAP.md](ROADMAP.md) and **[the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md)**. Each component's plan in `docs/superpowers/plans/` holds its rulings. The older design docs (`README.md`, `01`–`05`) are up to date with the frontend; the frontend design wins where they disagree.
 
 ## Where things stand
 
-- **Branch:** `backend`. Not merged to `main`, and there's no remote. All work is committed.
-- **Done:** backend 0–7; **7b** (frontend support + fake tutor); **8** (shell, welcome, key panel, projects, files); **9** (goal screen, chat, cards); **10 Tasks 1–2** (map layout/timing, the map itself). 173 tests pass, typecheck clean.
-- **Next:**
-  1. **Component 10, Task 3** (opening nodes: prerequisite banner, untaught nodes start themselves via `POST …/open`, thread switching rules). The plan's Task 3 says exactly what to build. Today `Goal.tsx` passes `onOpen={setThreadId}` to the map as a stand-in.
-  2. **Close out 10:** self-review against its Review Focus, copy the ledger's rulings into the plan (see "Ledger" below), mark ROADMAP row 10 done.
-  3. **Component 11:** write its plan (same format), then build: the usage popover (spec "Usage popover"; top bar **Usage** button on both screens), the goal-complete card ("Goal complete", "7 of 7 known", full green bar) and one confetti burst over the graph when the goal node turns Known, and the spec's "Doc updates" list (01, 02, 03, 04, 05; ROADMAP).
-  4. **Final whole-branch review** (self-review per the HANDOFF convention), then **show the user the finished frontend** (see "Showing the user" below).
+- **Branch:** `main` (`backend` was fast-forwarded into it and deleted on 2026-10-25). There's no remote. All work is committed.
+- **Done:** every component, 0–11. 176 tests pass, typecheck clean. The final whole-branch review was a self-review (the user chose no subagents); its deferred minors are under "Deferred minor issues".
+- **Next (the user's call):**
+  1. The user reviews the finished frontend and the **(my call)** items and rulings (listed for them at the end of the 2026-10-25 session).
+  2. The first live run with their key.
+  3. `docs/superpowers/plans/2026-10-25-agent-sdk.md` (untracked; the Agent SDK switch) when the user picks it.
 - **Execution:** native, `superpowers:executing-plans`, no subagents unless the user asks.
 - **No live Claude calls during the build.** Everything runs against the fake tutor; the first live run happens later, with the user.
 - **Check-ins (the user's choice):** none mid-build. Stop only for a real blocker, or anything destructive or outward-facing.
 - **Design questions:** the user owns every visual detail. Follow the design doc exactly; where it is silent, pick the option closest to its direction and record it as a ruling. Mockups are in `.superpowers/brainstorm/3844-1792904533/content/` (untracked); the doc wins over a mockup.
-
-## Ledger (component 10 in progress)
-
-`.superpowers/sdd/2026-10-25-map/progress.md` (git-ignored) records Tasks 1–2 as complete and these rulings, which still need copying into the plan's "Rulings made during the build" section when 10 closes:
-
-- The component is `StudyMap` in `components/Map.tsx` (a component named `Map` shadows the global `Map`).
-- Hover card is 240px, right of the node, else left, else below it when a half-width pane fits neither side.
-- The state-change bounce uses `element.animate` on the circle so the fill transition survives; arrowheads are drawn per edge (not SVG markers) so they take `--graph-ink` from CSS.
-
-Resume with `scripts/task-start docs/superpowers/plans/2026-10-25-map.md 3` from the executing-plans skill (it prints the brief and BASE).
 
 ## How to run
 
@@ -74,13 +63,13 @@ npm run build:web    # production build into dist/
 |---|---|
 | `main.tsx`, `App.tsx`, `styles.css` | Mount, Nunito, theme before first paint; key context and welcome gate; routes; all tokens (light + `[data-theme="dark"]`) and component styles |
 | `lib/api.ts` | `api()` with the saved key, `ApiError`, types, `uploadAll` |
-| `lib/key.ts`, `lib/app.tsx` | Key in `localStorage`, `checkAndSave`, `maskKey`; `useApp()` (key, status, panel, `requireKey`) |
+| `lib/key.ts`, `lib/app.tsx` | Key in `localStorage`, `checkAndSave`, `maskKey`; `useApp()` (key, status, panel, `requireKey`); `useDismiss` for top bar popovers |
 | `lib/router.ts`, `lib/theme.ts` | 20-line history router (`/`, `/projects/:id`, `/goals/:id`); theme follows OS until toggled |
-| `lib/format.ts` | Labels, bytes, badges, mastery segments, `clampSplit` |
+| `lib/format.ts` | Labels, bytes, badges, mastery segments, `clampSplit`, model names and token figures for Usage |
 | `lib/sse.ts`, `lib/turn.ts` | SSE over `fetch`; the turn reducer (live segments with absolute indexes, refetch/synced) and `errorView` |
 | `lib/cards.ts`, `lib/graph.ts` | Quiz keys and summary, question answers; dagre layout, `layoutKey`, light relay timings, label size, prerequisite text |
 | `pages/Welcome.tsx`, `Projects.tsx`, `Goal.tsx` | The three screens; `Goal` owns study, open thread, turn, queue, Stop/Retry, card answers |
-| `components/` | `TopBar`, `KeyPanel`/`KeyField`, `Sidebar`, `ProjectPage`, `Goals`, `Files`, `Dialog`, `MasteryBar`, `PhaseSteps`, `SplitPane`, `StrandPanel`, `Chat`, `Markdown` (KaTeX; one-line `$$…$$` → display), `QuizCard`, `QuestionCard`, `PlanCard`, `Map` (`StudyMap`) |
+| `components/` | `TopBar`, `KeyPanel`/`KeyField`, `Sidebar`, `ProjectPage`, `Goals`, `Files`, `Dialog`, `MasteryBar`, `PhaseSteps`, `SplitPane`, `StrandPanel`, `Chat`, `Markdown` (KaTeX; one-line `$$…$$` → display), `QuizCard`, `QuestionCard`, `PlanCard`, `Map` (`StudyMap`; explicit React Flow `handles`), `PrereqBanner`, `Usage` (`UsageButton`), `Confetti` |
 
 ## API for the frontend
 
@@ -113,7 +102,7 @@ SSE events: `text { delta }`, `status { kind }`, `card`, `focus { nodeId }`, `er
 
 **Other:** `node:sqlite`; per-study node ids with cascading composite keys; node threads only after approval; one turn per study; grading on the server only; `done` never undone; summaries after each turn; one usage row per model call.
 
-## Showing the user (at the end)
+## Showing the user (done 2026-10-25; repeat if asked)
 
 List, as the design doc asks, every **(my call)** item from the design doc plus every ruling recorded in the plans (7b, 8, 9, 10, 11), and remind them that server-side fallbacks are on. Offer the two-terminal run (`dev:fake` + `dev:web`) and the `[fail]` trick. The first live run with their key is still open.
 
@@ -129,6 +118,9 @@ List, as the design doc asks, every **(my call)** item from the design doc plus 
 - Deleting a goal cascades its usage rows, so project usage totals drop with it.
 - Deleting a project mid-turn isn't locked; the turn then fails on a foreign key and only logs.
 - A step with no thinking block can glue its text to the previous step's until `done` refetches.
+- The Usage popover lags the Haiku summary usage by one turn (summaries are written after `done`).
+- The map re-adopts every React Flow node on each `Goal` render (each streamed chunk); fine at this graph size.
+- Switching back to the running turn's thread mid-step can briefly show a stored step twice until the next refetch.
 
 ## Working conventions
 
