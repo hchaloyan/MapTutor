@@ -35,6 +35,10 @@ The appendix also tells the tutor:
 - That every probe quiz item needs a `strand`, and every quiz-check item needs a `nodeId`.
 - To settle the goal (the skill's 1b) before the level quiz (1a), because the strands to probe depend on the goal.
 - To put the prose approach in `propose_graph`'s `approach` field, not in chat.
+- To name the goal with `set_goal_title` once it is concrete.
+- That an app note saying the user opened a node means: teach that node now, from its beginning.
+- **Files first:** the project files are the user's own course material. Teach from them (their definitions, notation, and scope), check them before searching the web, search when they don't answer or seem wrong, and say so when a file disagrees with a reliable source.
+- **Teach new foundations inline:** a foundational fact that has no node is taught in the current node's thread (motivate, establish, connect, quiz-check there). There is no `add_node`.
 
 ## Tools
 
@@ -56,7 +60,6 @@ quiz({
     options: { id: string, text: string }[],
     correctOptionId: string,
     explanation: string,                  // shown only after answering
-    hint?: string,
     strand?: string,                      // required during probe
     nodeId?: string                       // required during quiz-check
   }[]
@@ -66,7 +69,7 @@ propose_graph({
   approach: string,                       // the prose plan, shown above the approval card
   nodes: {
     id: string,
-    label: string,                        // short
+    label: string,                        // about 3 words; it sits inside a small circle
     kind: "root" | "derived" | "goal",
     description: string,
     strands: string[]                     // probe strands that bear on this node
@@ -86,6 +89,7 @@ These run immediately and return an acknowledgement or an error.
 ```ts
 set_node_state({ nodeId, state, reason }) -> ok | error   // guarded; see 03-graph.md
 focus_node({ nodeId }) -> ok                               // highlights the node and switches the active thread
+set_goal_title({ title }) -> ok | error                    // probe and plan; 1–80 characters, about 2–6 words; the UI shows it as the goal's name
 ```
 
 ### Validation on `propose_graph`
@@ -108,7 +112,13 @@ Initial node states are computed by the app from probe evidence, not supplied by
    - **Client-rendered tool:** persist the pending tool call, stream the card to the client, and stop. When the user responds, append the `tool_result` and go back to step 1.
 3. Otherwise, persist the assistant message and stream it to the client.
 
-Responses stream over SSE.
+Responses stream over SSE: `text { delta }`, `status { kind: 'thinking' | 'searching' }` (when a thinking block or a web search starts; the client runs the timer), `card`, `focus { nodeId }`, `error { message }`, and exactly one `done { awaiting }`.
+
+**Turn control.** One turn runs per study at a time; anything else that would start one gets a 409.
+
+- **Stop** (`POST /api/studies/:id/stop`) aborts the running stream. The text streamed so far is appended as a text-only assistant message (the cut-off step's thinking and tool blocks are dropped; appending is still append-only), usage is recorded from what the stream reported, no further model call is made, and the client gets `done`. Stopped before any text, nothing is stored; the next user message follows the last one, and the API merges the two.
+- **Retry** (`POST /api/studies/:id/retry { nodeId? }`) re-runs a thread whose last message is a user message with no reply (after an error), without adding anything. Otherwise 409.
+- **Open** (`POST /api/studies/:id/open { nodeId }`) starts the lesson in a node thread with no messages: it focuses the node and appends a hidden `[App: The user opened "<label>". Teach it now.]` note with the study state. A node with history answers 204 and starts nothing.
 
 ## Context assembly
 
@@ -132,9 +142,9 @@ Per-node threads keep the context small and make out-of-order navigation cheap. 
 
 The skill requires checking any uncertain fact before teaching it. The app does this with Claude's server-side web search tool:
 
-- **Every phase:** web search is enabled with a low per-request `max_uses` cap, because the skill says to verify any uncertain fact before saying it, and probe quiz items state facts too.
+- **Every phase:** web search is enabled with no `max_uses` cap (the model decides how much to search), because the skill says to verify any uncertain fact before saying it, and probe quiz items state facts too. The files come first: the tutor checks them before searching.
 - **Plan phase:** one scoping pass before `propose_graph`, to confirm the core concepts, first principles, and common gotchas.
 - **Corrections:** if a check changes something already taught, the prompt tells the tutor to say so openly.
-- **Cost:** searches are billed to the user's key. The project page shows a note about this. The per-request cap should be a setting.
+- **Cost:** searches are billed to the user's key. The usage popover shows the search count.
 
 Use the tool version listed in the current Claude API docs.

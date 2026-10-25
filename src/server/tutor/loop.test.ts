@@ -119,6 +119,108 @@ test('every user message the server sends ends with study_state', async () => {
   t.say('help')
   await t.run()
   for (const row of t.rows().filter(r => r.role === 'user')) {
-    expect(String(row.content.at(-1)?.text)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, propose_graph, web_search\n<\/study_state>$/)
+    expect(String(row.content.at(-1)?.text)).toMatch(/^<study_state>\n[\s\S]*Tools allowed now: ask_user_question, quiz, propose_graph, set_goal_title, web_search\n<\/study_state>$/)
   }
+})
+
+/** A turn whose model calls are driven by `steps`; each gets the stream callbacks and options. */
+function controlled(steps: ((onText: (d: string) => void, opts: Parameters<StreamMessage>[3]) => Promise<Reply>)[]) {
+  const t = setup([])
+  const controller = new AbortController()
+  const streamMessage: StreamMessage = async (params, _key, onText, opts) => {
+    t.calls.push(structuredClone(params))
+    return { stop_reason: 'end_turn', ...(await steps.shift()!(onText, opts)) } as Anthropic.Beta.BetaMessage
+  }
+  const run = (signal?: AbortSignal) =>
+    runTurn({ db: t.db, studyId: 's1', nodeId: null, apiKey: 'sk-test', streamMessage, signal, emit: (e, d) => t.events.push([e, d as Record<string, unknown>]) })
+  return { ...t, controller, run }
+}
+
+const USAGE = { input_tokens: 10, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
+
+test('status events from the stream reach the client', async () => {
+  const t = controlled([
+    async (onText, opts) => {
+      opts?.onStatus?.('thinking')
+      opts?.onStatus?.('searching')
+      onText('Hi')
+      return text('Hi')
+    },
+  ])
+  t.say('hello')
+  await t.run()
+  expect(t.events).toEqual([
+    ['status', { kind: 'thinking' }],
+    ['status', { kind: 'searching' }],
+    ['text', { delta: 'Hi' }],
+    ['done', { awaiting: false }],
+  ])
+})
+
+test('a stop mid-stream keeps the streamed text and ends with one done', async () => {
+  const t = controlled([
+    async (onText, opts) => {
+      onText('Partial ')
+      onText('answer')
+      t.controller.abort()
+      expect(opts?.signal?.aborted).toBe(true)
+      // The real stream resolves with the partial message: no stop_reason, maybe a cut-off tool call.
+      return {
+        model: 'claude-opus-5-5',
+        usage: USAGE as Anthropic.Beta.BetaUsage,
+        stop_reason: null,
+        content: [
+          { type: 'thinking', thinking: '', signature: 'sig' },
+          { type: 'text', text: 'Partial answer' },
+          { type: 'tool_use', id: 'tu_1', name: 'quiz', input: {} },
+        ],
+      }
+    },
+  ])
+  t.say('hello')
+  await t.run(t.controller.signal)
+  expect(t.events).toEqual([['text', { delta: 'Partial ' }], ['text', { delta: 'answer' }], ['done', { awaiting: false }]])
+  expect(t.rows().map(r => [r.role, r.content, r.pending])).toEqual([
+    ['user', expect.any(Array), 0],
+    ['assistant', [{ type: 'text', text: 'Partial answer' }], 0],
+  ])
+  expect(t.db.prepare('SELECT model, input_tokens, output_tokens FROM usage').all()).toEqual([{ model: 'claude-opus-5-5', input_tokens: 10, output_tokens: 2 }])
+})
+
+test('a stop before any text stores nothing and the next message still works', async () => {
+  const t = controlled([
+    async () => {
+      t.controller.abort()
+      throw new Error('Request was aborted.')
+    },
+    async onText => {
+      onText('Back.')
+      return text('Back.')
+    },
+  ])
+  t.say('one')
+  await t.run(t.controller.signal)
+  expect(t.events).toEqual([['done', { awaiting: false }]])
+  expect(t.rows().map(r => r.role)).toEqual(['user'])
+  t.say('two')
+  await t.run()
+  expect(t.rows().map(r => r.role)).toEqual(['user', 'user', 'assistant'])
+  expect(t.calls[1].messages.map(m => m.role)).toEqual(['user', 'user'])
+})
+
+test('a stop between steps makes no further model call', async () => {
+  const t = controlled([
+    async () => {
+      // The stream finished just as the user pressed Stop: the tool runs, nothing after it does.
+      t.controller.abort()
+      return toolCall('set_goal_title', { title: 'Ace the midterm' })
+    },
+    async () => text('never'),
+  ])
+  t.say('help')
+  await t.run(t.controller.signal)
+  expect(t.calls).toHaveLength(1)
+  expect(t.events.filter(([e]) => e === 'done')).toEqual([['done', { awaiting: false }]])
+  expect(t.db.prepare('SELECT title FROM studies').get()).toEqual({ title: 'Ace the midterm' })
+  expect(t.rows().at(-1)!.content[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'tu_1' })
 })

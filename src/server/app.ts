@@ -1,6 +1,6 @@
 import Fastify from 'fastify'
 import type { DatabaseSync } from 'node:sqlite'
-import { anthropicError, htmlToMarkdown, streamMessage, summarize } from './core/anthropic'
+import { anthropicError, apiKey, type CheckKey, checkKey, htmlToMarkdown, streamMessage, summarize } from './core/anthropic'
 import { fileRoutes, type HtmlToMarkdown } from './routes/files'
 import { projectRoutes } from './routes/projects'
 import { studyRoutes } from './routes/studies'
@@ -13,6 +13,7 @@ export function buildApp(opts: {
   htmlToMarkdown?: HtmlToMarkdown
   streamMessage?: StreamMessage
   summarize?: Summarize
+  checkKey?: CheckKey
 }) {
   const { db, logStream } = opts
   const app = Fastify({
@@ -24,6 +25,11 @@ export function buildApp(opts: {
   app.get('/api/health', async () => {
     db.prepare('SELECT 1').get()
     return { ok: true }
+  })
+
+  app.post('/api/key/check', async (req, reply) => {
+    await (opts.checkKey ?? checkKey)(apiKey(req))
+    return reply.code(204).send()
   })
 
   projectRoutes(app, db)

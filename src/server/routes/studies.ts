@@ -21,9 +21,9 @@ export type ThreadItem =
 
 
 function requireStudy(db: DatabaseSync, id: string) {
-  const study = db.prepare('SELECT id, project_id AS projectId, goal, phase, approach, focus_node_id AS focusNodeId, search_cap AS searchCap FROM studies WHERE id = ?').get(id)
+  const study = db.prepare('SELECT id, project_id AS projectId, goal, title, phase, approach, focus_node_id AS focusNodeId FROM studies WHERE id = ?').get(id)
   if (!study) throw httpError(404, 'Study not found.')
-  return study as { id: string; projectId: string; goal: string; phase: Phase; approach: string | null; focusNodeId: string | null; searchCap: number }
+  return study as { id: string; projectId: string; goal: string; title: string | null; phase: Phase; approach: string | null; focusNodeId: string | null }
 }
 
 function requireNode(db: DatabaseSync, studyId: string, nodeId: string | null) {
@@ -58,18 +58,24 @@ function threadView(db: DatabaseSync, studyId: string, nodeId: string | null): T
 
 export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; streamMessage: StreamMessage; summarize: Summarize }) {
   const { db, streamMessage, summarize } = opts
-  // One turn per study, since focus_node can move a turn into another thread.
+  // One turn per study, since focus_node can move a turn into another thread. Stop aborts the controller.
   // ponytail: in-memory lock; holds only while one server process owns the database
-  const running = new Set<string>()
+  const running = new Map<string, AbortController>()
 
   function lock(studyId: string) {
     if (running.has(studyId)) throw httpError(409, 'The tutor is still replying.')
-    running.add(studyId)
-    return () => running.delete(studyId)
+    const controller = new AbortController()
+    running.set(studyId, controller)
+    return { signal: controller.signal, release: () => running.delete(studyId) }
   }
 
+  const lastMessage = (studyId: string, nodeId: string | null) =>
+    db
+      .prepare('SELECT role FROM messages WHERE study_id = ? AND node_id IS ? ORDER BY created_at DESC, rowid DESC LIMIT 1')
+      .get(studyId, nodeId) as { role: 'user' | 'assistant' } | undefined
+
   /** Streams one turn. Summaries come after `done` and the lock's release, so they never hold up the user. */
-  async function streamTurn(reply: FastifyReply, release: () => void, studyId: string, nodeId: string | null, key: string) {
+  async function streamTurn(reply: FastifyReply, turn: ReturnType<typeof lock>, studyId: string, nodeId: string | null, key: string) {
     reply.hijack()
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' })
     // A closed tab doesn't stop the turn: state stays consistent and the thread shows the reply on reload.
@@ -77,14 +83,14 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       if (!reply.raw.destroyed) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
     try {
-      await runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit })
+      await runTurn({ db, studyId, nodeId, apiKey: key, streamMessage, emit, signal: turn.signal })
     } catch (err) {
       const mapped = anthropicError(err)
       if (!mapped) app.log.error(err)
       emit('error', { message: mapped?.message ?? 'Something went wrong on the server.' })
       emit('done', { awaiting: false })
     } finally {
-      release()
+      turn.release()
       // A failed summary is retried after the next turn.
       await summarizeNew(db, studyId, key, summarize).catch(err => app.log.error(err))
       reply.raw.end()
@@ -97,6 +103,23 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
     strands: probeStrands(db, req.params.id),
     usage: usageByModel(db, 'study_id', req.params.id),
   }))
+
+  app.delete<{ Params: { id: string } }>('/api/studies/:id', async (req, reply) => {
+    requireStudy(db, req.params.id)
+    const turn = lock(req.params.id)
+    try {
+      db.prepare('DELETE FROM studies WHERE id = ?').run(req.params.id)
+    } finally {
+      turn.release()
+    }
+    return reply.code(204).send()
+  })
+
+  app.post<{ Params: { id: string } }>('/api/studies/:id/stop', async (req, reply) => {
+    requireStudy(db, req.params.id)
+    running.get(req.params.id)?.abort()
+    return reply.code(204).send()
+  })
 
   /** Ancestors that aren't known, most foundational first; the banner's "Go to" target is weak[0]. */
   app.get<{ Params: { id: string; nodeId: string } }>('/api/studies/:id/nodes/:nodeId/prerequisites', async req => {
@@ -133,14 +156,53 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       if (nodeId && (phase === 'probe' || phase === 'plan')) throw httpError(409, 'Node threads open once the plan is approved.')
       const text = req.body.text.trim()
       if (!text) throw httpError(400, "Message can't be blank.")
-      const release = lock(studyId)
+      const turn = lock(studyId)
       if (db.prepare('SELECT 1 FROM messages WHERE study_id = ? AND node_id IS ? AND pending = 1').get(studyId, nodeId)) {
-        release()
+        turn.release()
         throw httpError(409, 'Answer the card first.')
       }
       if (nodeId) db.prepare('UPDATE studies SET focus_node_id = ? WHERE id = ?').run(nodeId, studyId)
       appendUserMessage(db, studyId, nodeId, [{ type: 'text', text }])
-      return streamTurn(reply, release, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, key)
+    },
+  )
+
+  /** Re-runs a thread whose last message (text, tool_result, or app note) got no reply, e.g. after an error. */
+  app.post<{ Params: { id: string }; Body: { nodeId?: string } }>(
+    '/api/studies/:id/retry',
+    { schema: { body: { type: 'object', properties: { nodeId: { type: 'string' } } } } },
+    async (req, reply) => {
+      const key = apiKey(req)
+      const studyId = req.params.id
+      requireStudy(db, studyId)
+      const nodeId = req.body?.nodeId || null
+      requireNode(db, studyId, nodeId)
+      const turn = lock(studyId)
+      if (lastMessage(studyId, nodeId)?.role !== 'user') {
+        turn.release()
+        throw httpError(409, 'Nothing to retry.')
+      }
+      return streamTurn(reply, turn, studyId, nodeId, key)
+    },
+  )
+
+  /** Opening an untaught node starts its lesson; a node with history just shows its thread (204). */
+  app.post<{ Params: { id: string }; Body: { nodeId: string } }>(
+    '/api/studies/:id/open',
+    { schema: { body: { type: 'object', required: ['nodeId'], properties: { nodeId: { type: 'string', minLength: 1 } } } } },
+    async (req, reply) => {
+      const key = apiKey(req)
+      const studyId = req.params.id
+      const { phase } = requireStudy(db, studyId)
+      const { nodeId } = req.body
+      requireNode(db, studyId, nodeId)
+      if (phase === 'probe' || phase === 'plan') throw httpError(409, 'Node threads open once the plan is approved.')
+      if (lastMessage(studyId, nodeId)) return reply.code(204).send()
+      const turn = lock(studyId)
+      const { label } = db.prepare('SELECT label FROM nodes WHERE study_id = ? AND id = ?').get(studyId, nodeId) as { label: string }
+      db.prepare('UPDATE studies SET focus_node_id = ? WHERE id = ?').run(nodeId, studyId)
+      appendUserMessage(db, studyId, nodeId, [{ type: 'text', text: `[App: The user opened "${label}". Teach it now.]` }])
+      return streamTurn(reply, turn, studyId, nodeId, key)
     },
   )
 
@@ -164,10 +226,10 @@ export function studyRoutes(app: FastifyInstance, opts: { db: DatabaseSync; stre
       const nodeId = pending.node_id
       const result = tool.answer(toolUse.input, req.body.answer, { db, studyId, nodeId }, toolUse.id)
       if ('error' in result) throw httpError(400, result.error)
-      const release = lock(studyId)
+      const turn = lock(studyId)
       clearPending(db, pending.id)
       appendUserMessage(db, studyId, nodeId, [{ type: 'tool_result', tool_use_id: toolUse.id, content: result.content }])
-      return streamTurn(reply, release, studyId, nodeId, key)
+      return streamTurn(reply, turn, studyId, nodeId, key)
     },
   )
 }

@@ -86,7 +86,24 @@ const askUserQuestion: ClientTool = {
   },
 }
 
-export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool, focusNodeTool, setNodeStateTool]
+const setGoalTitle: ServerTool = {
+  kind: 'server',
+  def: {
+    name: 'set_goal_title',
+    description: "Name the goal once it is concrete: a short title of about 2–6 words. The app shows it as the goal's name.",
+    input_schema: { type: 'object', properties: { title: { type: 'string', maxLength: 80 } }, required: ['title'] },
+  },
+  phases: ['probe', 'plan'],
+  run(input, { db, studyId }) {
+    const raw = (input as { title?: unknown } | null)?.title
+    const title = typeof raw === 'string' ? raw.trim() : ''
+    if (!title || title.length > 80) return { content: 'set_goal_title needs a title of 1–80 characters.', isError: true }
+    db.prepare('UPDATE studies SET title = ? WHERE id = ?').run(title, studyId)
+    return { content: `Goal title set to "${title}".` }
+  },
+}
+
+export const TOOLS: Tool[] = [askUserQuestion, quizTool, proposeGraphTool, focusNodeTool, setNodeStateTool, setGoalTitle]
 
 /** Anthropic's server tools are always available; context.ts declares them. */
 export const allowedTools = (phase: Phase) => [...TOOLS.filter(t => t.phases.includes(phase)).map(t => t.def.name), 'web_search']

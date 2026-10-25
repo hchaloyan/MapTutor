@@ -38,11 +38,11 @@ CREATE TABLE files (
 CREATE TABLE studies (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  goal        TEXT NOT NULL,             -- refined during probe
+  goal        TEXT NOT NULL,             -- what the user typed
+  title       TEXT,                      -- short name from set_goal_title; NULL until set
   phase       TEXT NOT NULL CHECK (phase IN ('probe','plan','teach','done')),
   approach    TEXT,                      -- prose plan from the approved propose_graph
   focus_node_id TEXT,                    -- the node being taught; set by focus_node or by opening its thread
-  search_cap  INTEGER NOT NULL DEFAULT 3, -- web_search max_uses; fixed at creation because tools can't change mid-study
   created_at  INTEGER NOT NULL
 );
 
@@ -80,7 +80,6 @@ CREATE TABLE quiz_items (
   options           TEXT NOT NULL,          -- JSON {id, text}[]
   correct_option_id TEXT NOT NULL,
   explanation       TEXT NOT NULL,
-  hint              TEXT,
   chosen_option_id  TEXT,                   -- NULL until answered
   answered_at       INTEGER,
   FOREIGN KEY (study_id, node_id) REFERENCES nodes(study_id, id) ON DELETE CASCADE

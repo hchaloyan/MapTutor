@@ -68,3 +68,35 @@ test('creating a study in an unknown project is a 404', async () => {
   const res = await app.inject({ method: 'POST', url: '/api/projects/nope/studies', payload: { goal: 'midterm' } })
   expect(res.statusCode).toBe(404)
 })
+
+test('lists projects with goal and file counts', async () => {
+  const { app } = setup()
+  const p = await createProject(app, 'Calculus')
+  const empty = await createProject(app, 'Networks')
+  for (const goal of ['midterm', 'final']) await app.inject({ method: 'POST', url: `/api/projects/${p.id}/studies`, payload: { goal } })
+  await app.inject({
+    method: 'POST',
+    url: `/api/projects/${p.id}/files?name=notes.md`,
+    headers: { 'content-type': 'application/octet-stream' },
+    payload: Buffer.from('# Notes'),
+  })
+  const list = (await app.inject('/api/projects')).json()
+  expect(list).toEqual([
+    { ...empty, goalCount: 0, fileCount: 0 },
+    { ...p, goalCount: 2, fileCount: 1 },
+  ])
+})
+
+test('renames a project; a blank name is a 400 and an unknown project a 404', async () => {
+  const { app } = setup()
+  const p = await createProject(app, 'Calculus')
+  const rename = (id: string, name: string) => app.inject({ method: 'PATCH', url: `/api/projects/${id}`, payload: { name } })
+  const res = await rename(p.id, '  Calculus 101 ')
+  expect(res.statusCode).toBe(200)
+  expect(res.json()).toEqual({ id: p.id, name: 'Calculus 101', createdAt: p.createdAt })
+  expect((await app.inject(`/api/projects/${p.id}`)).json().name).toBe('Calculus 101')
+  const blank = await rename(p.id, '   ')
+  expect(blank.statusCode).toBe(400)
+  expect(blank.json().message).toBe("Name can't be blank.")
+  expect((await rename('nope', 'X')).statusCode).toBe(404)
+})

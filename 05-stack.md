@@ -47,7 +47,7 @@ Size limits: 5 MB per image (the API limit) and 20 MB per project in total, so t
 
 - **Two prompt-cache breakpoints:** one after the fixed system prompt, and one after the project files. Every turn reuses both, which is the biggest cost lever for BYOK users.
 - **Small per-turn context:** per-node threads and Known-node summaries keep the uncached part small.
-- **Web search** is capped per request with `max_uses` (see [02-agent.md](02-agent.md#verification)).
+- **Web search** is uncapped; the model decides how much to search, and the usage popover shows the count (see [02-agent.md](02-agent.md#verification)).
 - **Usage display:** show token and search usage per study, taken from the API response's usage fields, so friends can see what they're spending.
 
 ## Model

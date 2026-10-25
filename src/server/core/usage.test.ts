@@ -53,7 +53,7 @@ test('each tutor call is recorded and totaled per model on the study', async () 
 test('summaries are recorded on their study', async () => {
   const db = openDb(':memory:')
   db.prepare("INSERT INTO projects (id, user_id, name, created_at) VALUES ('p1', ?, 'Calc', 0)").run(LOCAL_USER_ID)
-  db.prepare("INSERT INTO studies (id, project_id, goal, phase, search_cap, created_at) VALUES ('s1', 'p1', 'midterm', 'teach', 3, 0)").run()
+  db.prepare("INSERT INTO studies (id, project_id, goal, phase, created_at) VALUES ('s1', 'p1', 'midterm', 'teach', 0)").run()
   db.prepare("INSERT INTO nodes (id, study_id, label, kind, description, state, ever_known, updated_at) VALUES ('n1', 's1', 'N', 'root', 'd', 'known', 1, 0)").run()
   db.prepare("INSERT INTO messages (id, study_id, node_id, role, content, created_at) VALUES ('m1', 's1', 'n1', 'assistant', ?, 0)").run(
     JSON.stringify([{ type: 'text', text: 'Lesson.' }]),
@@ -65,23 +65,4 @@ test('summaries are recorded on their study', async () => {
   expect(db.prepare('SELECT project_id, study_id, model, input_tokens, output_tokens, web_searches FROM usage').all()).toEqual([
     { project_id: 'p1', study_id: 's1', model: 'claude-haiku-5-5', input_tokens: 30, output_tokens: 4, web_searches: 0 },
   ])
-})
-
-test('the search cap is set per study at creation and sent as max_uses', async () => {
-  const t = await setup([
-    { content: [{ type: 'text', text: 'a' }], stop_reason: 'end_turn' },
-    { content: [{ type: 'text', text: 'b' }], stop_reason: 'end_turn' },
-  ])
-  const capped = (await t.createStudy({ goal: 'midterm', searchCap: 5 })).json()
-  const plain = (await t.createStudy({ goal: 'final' })).json()
-  expect([capped.searchCap, plain.searchCap]).toEqual([5, 3])
-  for (const bad of [0, 11, 2.5, 'lots']) expect((await t.createStudy({ goal: 'x', searchCap: bad })).statusCode).toBe(400)
-  for (const s of [capped, plain]) {
-    await t.app.inject({ method: 'POST', url: `/api/studies/${s.id}/messages`, headers: KEY, payload: { text: 'go' } })
-  }
-  expect(t.calls.map(c => c.tools?.at(-1))).toEqual([
-    { type: 'web_search_20260209', name: 'web_search', max_uses: 5 },
-    { type: 'web_search_20260209', name: 'web_search', max_uses: 3 },
-  ])
-  expect((await t.app.inject(`/api/studies/${capped.id}`)).json().searchCap).toBe(5)
 })

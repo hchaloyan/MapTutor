@@ -102,10 +102,7 @@ export function buildRequest(
   nodeId: string | null,
   tools: Anthropic.Beta.BetaToolUnion[],
 ): MessageStreamParams {
-  const { projectId, searchCap } = db.prepare('SELECT project_id AS projectId, search_cap AS searchCap FROM studies WHERE id = ?').get(studyId) as {
-    projectId: string
-    searchCap: number
-  }
+  const { projectId } = db.prepare('SELECT project_id AS projectId FROM studies WHERE id = ?').get(studyId) as { projectId: string }
   const files = fileBlocks(db, projectId)
   const thread = threadMessages(db, studyId, nodeId)
   const messages: MessageParam[] = [...(files.length ? [withBreakpoint({ role: 'user', content: files })] : []), ...thread]
@@ -118,7 +115,7 @@ export function buildRequest(
     thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'drop_block' } },
     output_config: { effort: 'high' },
     system: [{ type: 'text', text: systemPrompt(), cache_control: CACHE }],
-    tools: [...tools, { type: 'web_search_20260209', name: 'web_search', max_uses: searchCap }],
+    tools: [...tools, { type: 'web_search_20260209', name: 'web_search' }],
     tool_choice: { type: 'auto', disable_parallel_tool_use: true },
     messages,
   }

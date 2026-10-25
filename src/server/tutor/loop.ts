@@ -4,12 +4,15 @@ import { recordUsage } from '../core/usage'
 import { buildRequest, type MessageStreamParams, studyStateText } from './context'
 import { allowedTools, type Phase, type ServerTool, TOOLS, type ToolCtx } from './tools'
 
+export type Status = 'thinking' | 'searching'
+/** When `signal` aborts, resolves with the partial message if the stream got that far, else rejects. */
 export type StreamMessage = (
   params: MessageStreamParams,
   apiKey: string,
   onText: (delta: string) => void,
+  opts?: { onStatus?: (kind: Status) => void; signal?: AbortSignal },
 ) => Promise<Anthropic.Beta.BetaMessage>
-export type Emit = (event: 'text' | 'card' | 'focus' | 'error' | 'done', data: object) => void
+export type Emit = (event: 'text' | 'status' | 'card' | 'focus' | 'error' | 'done', data: object) => void
 
 export const MAX_STEPS = 20
 
@@ -46,6 +49,7 @@ export function clearPending(db: DatabaseSync, messageId: string) {
 /**
  * Runs the tutor from the thread's current state until it ends, pauses on a card, or fails. Model errors propagate.
  * focus_node can move the turn into another thread; a `focus` event tells the client.
+ * An aborted `signal` (Stop) keeps the text streamed so far and makes no further model call.
  */
 export async function runTurn(opts: {
   db: DatabaseSync
@@ -54,6 +58,7 @@ export async function runTurn(opts: {
   apiKey: string
   streamMessage: StreamMessage
   emit: Emit
+  signal?: AbortSignal
 }) {
   const { db, studyId, emit } = opts
   let nodeId = opts.nodeId
@@ -64,10 +69,28 @@ export async function runTurn(opts: {
     emit('done', { awaiting: false })
   }
 
+  const { signal } = opts
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (signal?.aborted) return emit('done', { awaiting: false })
     const request = buildRequest(db, studyId, nodeId, TOOLS.map(t => t.def))
-    const message = await opts.streamMessage(request, opts.apiKey, delta => emit('text', { delta }))
-    if (message.usage) recordUsage(db, projectId, studyId, message)
+    let streamed = ''
+    const onText = (delta: string) => {
+      streamed += delta
+      emit('text', { delta })
+    }
+    let message: Anthropic.Beta.BetaMessage | null
+    try {
+      message = await opts.streamMessage(request, opts.apiKey, onText, { onStatus: kind => emit('status', { kind }), signal })
+    } catch (err) {
+      if (!signal?.aborted) throw err
+      message = null
+    }
+    if (message?.usage) recordUsage(db, projectId, studyId, message)
+    if (!message || (signal?.aborted && !message.stop_reason)) {
+      // Stopped mid-stream: the cut-off step's thinking and tool blocks are dropped; appending its text is still append-only.
+      if (streamed) insertMessage(db, studyId, nodeId, 'assistant', [{ type: 'text', text: streamed }])
+      return emit('done', { awaiting: false })
+    }
     const toolUse = message.content.find((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
     const tool = toolUse && TOOLS.find(t => t.def.name === toolUse.name)
     const phase = phaseOf(db, studyId)

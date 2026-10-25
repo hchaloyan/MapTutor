@@ -12,8 +12,9 @@ Backend first, then frontend. Each component ends with something that runs and h
 | 3 | Agent loop | Context assembly with 2 cache breakpoints, tool loop with pause/resume on client tools, SSE, message persistence, tool-result route, `ask_user_question` | 0, 1 | Done: [plan](docs/superpowers/plans/2026-10-24-agent-loop.md) |
 | 4 | Probe | `quiz` tool, server-side grading, `quiz_items` with strands, Probe → Plan switch | 3 | Done: [plan](docs/superpowers/plans/2026-10-24-probe.md) |
 | 5 | Plan | Scoping web search, `propose_graph` validation, approve/feedback, initial states, approve → Teach | 2, 4 | Done: [plan](docs/superpowers/plans/2026-10-24-plan.md) |
-| 6 | Teach | Per-node threads, `focus_node`, quiz-check transitions, `set_node_state` guards, summaries side call, next node, prerequisite check | 5 | Done: [plan](docs/superpowers/plans/2026-10-24-teach.md), except new nodes during Teach (open) |
+| 6 | Teach | Per-node threads, `focus_node`, quiz-check transitions, `set_node_state` guards, summaries side call, next node, prerequisite check | 5 | Done: [plan](docs/superpowers/plans/2026-10-24-teach.md) |
 | 7 | Usage | Token and search usage per study, search cap setting | 3 | Done: [plan](docs/superpowers/plans/2026-10-24-usage.md) |
+| 7b | Frontend support | No hints or search cap, goal titles, project rename and counts, goal deletion, `status` events, Stop, Retry, Open, key check, scripted fake tutor | 3–7 | Done: [plan](docs/superpowers/plans/2026-10-25-frontend-support.md) |
 
 ## Frontend
 
@@ -30,12 +31,12 @@ Backend first, then frontend. Each component ends with something that runs and h
 - **Build order:** all backend, then all frontend. No terminal client; the tutor is first used from the frontend (2026-10-24).
 - **Grading:** on the server. Quiz items are saved when the tutor calls `quiz`; the client sends back only the chosen option IDs.
 - **Probe → Plan:** the server switches the phase on the tutor's first `propose_graph` call. Revisit in component 5.
-- **`quiz_items.hint`:** added to the schema.
+- **Quiz hints:** removed from the tool and the schema; the frontend design has no hints (2026-10-25).
 - **Teaching skill:** stored verbatim in [prompts/teaching-skill.md](prompts/teaching-skill.md); frontmatter stripped when the prompt is built.
 - **Tool names follow the skill:** `ask_goal` is now `ask_user_question` and is allowed in every phase, since the skill also uses it mid-lesson.
 - **Web search in every phase:** the skill says to verify any uncertain fact, including in probe questions.
+- **New nodes during Teach:** none. A new unconditional truth needed mid-lesson is taught inline in the current node's thread; no `add_node` tool (2026-10-24).
 
 ## Open
 
-- **New nodes during Teach:** the skill says a new unconditional truth needed mid-session gets its own loop, but nothing in the app can add a node after approval. Component 6 shipped without it; decide between an `add_node` tool and teaching inline.
-- **Visual design:** decide before component 8 (the repo has a Material 3 skill installed).
+- **Visual design:** settled with the user in [the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md) (2026-10-25). It also lists backend changes the frontend needs.

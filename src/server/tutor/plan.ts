@@ -49,7 +49,7 @@ export const proposeGraphTool: ClientTool = {
             type: 'object',
             properties: {
               id: { type: 'string' },
-              label: { type: 'string', description: 'Short.' },
+              label: { type: 'string', description: 'About 3 words; it sits inside a small circle on the map.' },
               kind: { type: 'string', enum: ['root', 'derived', 'goal'] },
               description: { type: 'string' },
               strands: { type: 'array', items: { type: 'string' }, description: 'Probe strands that bear on this node.' },

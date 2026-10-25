@@ -1,15 +1,17 @@
-# Handoff: MapTutor backend, after component 7
+# Handoff: MapTutor, frontend designed, component 7b planned
 
-You're picking up a build in progress. Read this file first, then [ROADMAP.md](ROADMAP.md), then the design docs (`README.md`, `01`–`05`). The design docs are the spec; this file covers what was built, what was decided along the way, and what comes next.
+You're picking up a build in progress. Read this file first, then [ROADMAP.md](ROADMAP.md), then **[the frontend design](docs/superpowers/specs/2026-10-25-frontend-design.md)** and **[the component 7b plan](docs/superpowers/plans/2026-10-25-frontend-support.md)**, then the older design docs (`README.md`, `01`–`05`) as needed. The frontend design wins where it and `01`–`05` disagree.
 
 ## Where things stand
 
 - **Branch:** `backend`. Not merged to `main`, and there's no remote. All work is committed.
-- **Done:** backend components 0–7 (server skeleton, projects & files API, graph engine, agent loop, probe/quiz, plan, teach, usage). 122 tests pass, and `npm run typecheck` is clean.
-- **Not done in the backend:** new nodes during Teach (open question 1 below).
-- **Next:** the frontend, components 8–11. Ask open question 2 (visual design) before starting.
-- **Build order (the user's choice):** all backend first, then all frontend. There's no terminal chat client; the user is fine waiting until the frontend to talk to the tutor.
-- **Mode:** the user asked to keep building and reviewing my own work until a real blocker. Don't stop to ask between components; stop only for the open questions below, or anything destructive or outward-facing.
+- **Done:** backend components 0–7 (122 tests pass, typecheck clean). The full frontend visual and interaction design, settled with the user screen by screen (2026-10-24/25). The plan for component 7b.
+- **Next:** execute component 7b (backend changes the frontend needs, plus a scripted fake tutor), then components 8–11. Write each later component's plan when you reach it (same format as the others in `docs/superpowers/plans/`), then build it.
+- **Execution:** native (implement each plan yourself with `superpowers:executing-plans`), started in a fresh session to keep context small. The user chose this after the design session ran long. If they ask for subagent-driven instead, use that.
+- **No live Claude calls during the build.** The user chose a fake tutor over providing a key; the first live run happens later, with them.
+- **Check-ins (the user's choice):** none mid-build. Build all of 7b and 8–11, self-review, then show the user the finished frontend. Stop only for a real blocker, or anything destructive or outward-facing.
+- **Design questions:** the user wants to decide every visual detail. The design doc records their choices; anything marked "(my call)" there was the designer's, so keep it but mention it when showing the result. If the build hits a visual question the doc doesn't answer, note it and pick the option closest to the doc's direction rather than stopping.
+- **Mockups** from the design session are in `.superpowers/brainstorm/3844-1792904533/content/` (untracked). The design doc names the useful ones. Where a mockup and the doc disagree, the doc wins.
 
 ## How to run
 
@@ -17,11 +19,13 @@ You're picking up a build in progress. Read this file first, then [ROADMAP.md](R
 npm test            # vitest, all server tests
 npm run typecheck   # tsc --noEmit (TypeScript 7)
 npm run dev:server  # tsx watch, Fastify on 127.0.0.1:3001, DB at data/maptutor.db
+npm run dev:fake    # same, with the scripted fake tutor (no Claude calls), DB at data/maptutor-fake.db
 ```
 
 - **Startup warning:** `ExperimentalWarning: SQLite …` is expected.
+- **Fake tutor** (`src/server/tutor/fake.ts`, `--fake`): replaces every Claude seam. It ignores the goal and walks one calculus graph: question → title → probe quiz (with a `searching` status) → plan → approval → a lesson and one-item quiz-check per node → done. A wrong check answer repeats the question; plan feedback re-proposes. Keys starting `sk-ant-` pass its key check. It logs `Fake tutor: no Claude calls are made.`
 - **Leftover server on Windows:** the `tsx watch` child can outlive a killed `npm`. Free the port with `netstat -ano | grep :3001` and `taskkill //PID <pid> //T //F`.
-- **No migrations:** after any schema change, the dev database has to go. Deleting it was blocked by the permission classifier this session, so the old one was moved to `data/maptutor.pre-component-5.db.bak` (the earlier smoke-test project only). The current `data/maptutor.db` holds one smoke-test project from this session. Both can be deleted.
+- **No migrations:** after any schema change, the dev database has to go. Deleting it was blocked by the permission classifier this session, so the old one was moved to `data/maptutor.pre-component-5.db.bak` (the earlier smoke-test project only). The current `data/maptutor.db` holds one smoke-test project from this session. Both can be deleted. Component 7b added `studies.title`, so the dev database from before it was moved to `data/maptutor.pre-7b.db.bak`; `data/maptutor.db` is recreated on the next `dev:server`.
 - **No API key in this environment:** `ANTHROPIC_API_KEY` is unset and the `ant` CLI isn't installed. Every Claude call is behind an injectable seam (`htmlToMarkdown`, `streamMessage`, `summarize`), so tests use fakes. The real SDK path was checked with a bogus key and returned the expected 401 → SSE error. **A successful live call has never run**, including the Haiku summary call. Do one when a key exists.
 
 ## Code map (`src/server/`)
@@ -57,16 +61,21 @@ All JSON. Turn routes need the `x-anthropic-key` header and answer with SSE.
 
 | Route | What it returns or does |
 |---|---|
-| `GET/POST /api/projects`, `GET/DELETE /api/projects/:id` | Project with `files`, `studies` (each with `counts` per state, `searchCap`, `usage`), and project-wide `usage` |
+| `GET /api/projects` | `[{ id, name, createdAt, goalCount, fileCount }]` |
+| `POST /api/projects`, `GET/PATCH/DELETE /api/projects/:id` | Project with `files`, `studies` (each with `title`, `counts` per state, `usage`), and project-wide `usage`. `PATCH { name }` renames |
 | `POST /api/projects/:id/files?name=…` (octet-stream), `POST /api/projects/:id/urls`, `POST /api/files/:id/refresh`, `GET /api/files/:id/content`, `DELETE /api/files/:id` | Context files |
-| `POST /api/projects/:id/studies` `{ goal, searchCap? }` | `searchCap` is 1–10, default 3, fixed for the study |
-| `GET /api/studies/:id` | `goal, phase, approach, focusNodeId, searchCap, nodes, edges, strands, usage`. Nodes: `{ id, label, kind, description, strands, state, everKnown, summary, evidence: { correct, total } }` |
+| `POST /api/projects/:id/studies` `{ goal }` | Creates a goal in probe |
+| `DELETE /api/studies/:id` | Deletes a goal and everything in it; 409 while a turn runs |
+| `GET /api/studies/:id` | `goal, title, phase, approach, focusNodeId, nodes, edges, strands, usage`. `title` is NULL until the tutor calls `set_goal_title`. Nodes: `{ id, label, kind, description, strands, state, everKnown, summary, evidence: { correct, total } }` |
 | `GET /api/studies/:id/thread?nodeId=` | Thread items: `user`/`assistant` text and `card`s (`toolUseId, name, input, answer, pending`) |
 | `GET /api/studies/:id/nodes/:nodeId/prerequisites` | `{ weak: [{ id, state }] }`; the banner's "Go to" target is `weak[0]` |
 | `POST /api/studies/:id/messages` `{ text, nodeId? }` | Starts a turn. Posting to a node thread focuses that node. 409 if a turn is running in the study, a card is pending in that thread, or the study is still in probe/plan and `nodeId` is set |
+| `POST /api/studies/:id/stop` | Aborts the running turn (204 either way); its streamed text is kept and the turn's stream ends with `done` |
+| `POST /api/studies/:id/retry` `{ nodeId? }` | Re-runs a thread whose last message got no reply (after an error); 409 `Nothing to retry.` otherwise |
+| `POST /api/studies/:id/open` `{ nodeId }` | Starts the lesson in an empty node thread (SSE); 204 if the thread has history; 409 before approval |
 | `POST /api/studies/:id/tool-results` `{ toolUseId, answer }` | Answers a card and resumes. Answers: `ask_user_question` `{ answers: string[] }`, `quiz` `{ choices: { [itemId]: optionId } }`, `propose_graph` `{ decision: 'approved' }` or `{ decision: 'feedback', text }` |
 
-SSE events: `text { delta }`, `card { toolUseId, name, input }`, `focus { nodeId }` (the rest of the turn streams into that node's thread, so switch the chat to it), `error { message }`, `done { awaiting }`. Every response ends with exactly one `done`. Refetch the study after `done` to pick up phase, states, and the graph. The response stays open a few seconds after `done` while summaries are written; the client can stop reading at `done`.
+SSE events: `text { delta }`, `status { kind: 'thinking' | 'searching' }`, `card { toolUseId, name, input }`, `focus { nodeId }` (the rest of the turn streams into that node's thread, so switch the chat to it), `error { message }`, `done { awaiting }`. Every response ends with exactly one `done`. Refetch the study after `done` to pick up phase, states, and the graph. The response stays open a few seconds after `done` while summaries are written; the client can stop reading at `done`.
 
 ## Decisions you must not undo
 
@@ -98,9 +107,7 @@ SSE events: `text { delta }`, `card { toolUseId, name, input }`, `focus { nodeId
 
 ## Open questions for the user
 
-1. **New nodes during Teach:** the teaching skill says a new foundational fact needed mid-lesson gets its own loop, but nothing can add a node after approval. The options are an `add_node` tool with validation, or teaching it inline without a node.
-2. **Visual design** (before component 8): the repo has a Material 3 skill installed (`.agents/skills/material-3`). Ask whether they want that look.
-3. **A real API key** for the first live run.
+1. **A real API key** for the first live run, after the frontend is built. (Resolved: new nodes during Teach are taught inline, and the visual design is in the design doc.)
 
 ## Deferred minor issues
 

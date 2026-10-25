@@ -14,7 +14,7 @@ const item = (id: string, correct: string, extra: object = {}) => ({
   explanation: `Because ${id}.`,
   ...extra,
 })
-const QUIZ = { items: [item('q1', 'q1a', { hint: 'Think.', strand: 'arithmetic' }), item('q2', 'q2b', { strand: 'arithmetic' })] }
+const QUIZ = { items: [item('q1', 'q1a', { strand: 'arithmetic' }), item('q2', 'q2b', { strand: 'arithmetic' })] }
 
 function setup(phase = 'probe') {
   const db = openDb(':memory:')
@@ -32,7 +32,7 @@ test('the card hides answers until the user answers', () => {
   const { ctx } = setup()
   expect(quizTool.card(QUIZ, ctx, false)).toEqual({
     items: [
-      { id: 'q1', prompt: 'Question q1', options: QUIZ.items[0].options, hint: 'Think.' },
+      { id: 'q1', prompt: 'Question q1', options: QUIZ.items[0].options },
       { id: 'q2', prompt: 'Question q2', options: QUIZ.items[1].options },
     ],
   })
@@ -40,6 +40,9 @@ test('the card hides answers until the user answers', () => {
     items: [{ correctOptionId: 'q1a', explanation: 'Because q1.' }, { correctOptionId: 'q2b', explanation: 'Because q2.' }],
   })
   expect(JSON.stringify(quizTool.card(QUIZ, ctx, true))).not.toContain('arithmetic')
+  // Hints are gone from the tool; one the model sends anyway never reaches the card.
+  const hinted = { items: [{ ...QUIZ.items[0], hint: 'Think.' }] }
+  expect(JSON.stringify(quizTool.card(hinted, ctx, true))).not.toContain('Think.')
 })
 
 test('answering grades on the server and stores quiz items', () => {
@@ -54,10 +57,10 @@ test('answering grades on the server and stores quiz items', () => {
     }),
   })
   expect(
-    db.prepare('SELECT id, quiz_call_id, phase, strand, node_id, chosen_option_id, correct_option_id, hint FROM quiz_items ORDER BY id').all(),
+    db.prepare('SELECT id, quiz_call_id, phase, strand, node_id, chosen_option_id, correct_option_id FROM quiz_items ORDER BY id').all(),
   ).toEqual([
-    { id: 'tu_1:q1', quiz_call_id: 'tu_1', phase: 'probe', strand: 'arithmetic', node_id: null, chosen_option_id: 'q1a', correct_option_id: 'q1a', hint: 'Think.' },
-    { id: 'tu_1:q2', quiz_call_id: 'tu_1', phase: 'probe', strand: 'arithmetic', node_id: null, chosen_option_id: 'q2a', correct_option_id: 'q2b', hint: null },
+    { id: 'tu_1:q1', quiz_call_id: 'tu_1', phase: 'probe', strand: 'arithmetic', node_id: null, chosen_option_id: 'q1a', correct_option_id: 'q1a' },
+    { id: 'tu_1:q2', quiz_call_id: 'tu_1', phase: 'probe', strand: 'arithmetic', node_id: null, chosen_option_id: 'q2a', correct_option_id: 'q2b' },
   ])
 })
 

@@ -54,7 +54,7 @@ test('study state lists goal, phase, thread, and allowed tools', () => {
   expect(studyStateText(db, 's1', 'n1', [])).toContain('Thread: node n1')
 })
 
-test('request pins model, effort, thinking binding, fallbacks, tool choice, and web search cap', () => {
+test('request pins model, effort, thinking binding, fallbacks, tool choice, and uncapped web search', () => {
   const { db, addMessage } = setup()
   addMessage('m1', 'user', [{ type: 'text', text: 'hi' }])
   const req = buildRequest(db, 's1', null, [])
@@ -67,7 +67,7 @@ test('request pins model, effort, thinking binding, fallbacks, tool choice, and 
     tool_choice: { type: 'auto', disable_parallel_tool_use: true },
   })
   expect(req.betas).toEqual(expect.arrayContaining(['thinking-binding-controls-2026-08-01', 'server-side-fallback-2026-07-01']))
-  expect(req.tools?.at(-1)).toEqual({ type: 'web_search_20260209', name: 'web_search', max_uses: 3 })
+  expect(req.tools?.at(-1)).toEqual({ type: 'web_search_20260209', name: 'web_search' })
 })
 
 test('breakpoints sit on system, the last file block, and the last message, all 1h', () => {

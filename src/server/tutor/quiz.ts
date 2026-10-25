@@ -10,7 +10,6 @@ type Item = {
   options: Option[]
   correctOptionId: string
   explanation: string
-  hint?: string
   strand?: string
   nodeId?: string
 }
@@ -43,7 +42,6 @@ function problems(input: unknown, ctx: ToolCtx): string[] {
       new Set(optionIds).size === optionIds.length
     if (!validOptions) errors.push(`${name} needs 2–6 options, each with a distinct id and non-empty text.`)
     else if (!optionIds.includes(it.correctOptionId!)) errors.push(`${name}: correctOptionId "${it.correctOptionId}" is not one of its option ids.`)
-    if (it?.hint !== undefined && typeof it.hint !== 'string') errors.push(`${name}: hint must be text.`)
     if (check) {
       if (!nonEmpty(it?.nodeId)) errors.push(`${name} needs a nodeId during teaching.`)
       else if (!ctx.db.prepare('SELECT 1 FROM nodes WHERE id = ? AND study_id = ?').get(it.nodeId, ctx.studyId)) {
@@ -84,7 +82,6 @@ export const quizTool: ClientTool = {
               },
               correctOptionId: { type: 'string' },
               explanation: { type: 'string', description: 'Shown only after the user answers. All reasoning goes here, never in options.' },
-              hint: { type: 'string' },
               strand: { type: 'string', description: 'Required during the probe.' },
               nodeId: { type: 'string', description: 'Required during a quiz-check.' },
             },
@@ -99,11 +96,10 @@ export const quizTool: ClientTool = {
   check: (input, ctx) => problems(input, ctx).join('\n') || null,
   card(input, _ctx, answered) {
     return {
-      items: (input as Quiz).items.map(({ id, prompt, options, hint, correctOptionId, explanation }) => ({
+      items: (input as Quiz).items.map(({ id, prompt, options, correctOptionId, explanation }) => ({
         id,
         prompt,
         options,
-        ...(hint !== undefined && { hint }),
         ...(answered && { correctOptionId, explanation }),
       })),
     }
@@ -117,14 +113,14 @@ export const quizTool: ClientTool = {
 
     const check = isCheck(ctx)
     const insert = ctx.db.prepare(
-      `INSERT INTO quiz_items (id, study_id, quiz_call_id, phase, strand, node_id, prompt, options, correct_option_id, explanation, hint, chosen_option_id, answered_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO quiz_items (id, study_id, quiz_call_id, phase, strand, node_id, prompt, options, correct_option_id, explanation, chosen_option_id, answered_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     const now = Date.now()
     for (const it of items) {
       insert.run(
         `${toolUseId}:${it.id}`, ctx.studyId, toolUseId, check ? 'check' : 'probe', check ? null : it.strand!, check ? it.nodeId! : null,
-        it.prompt, JSON.stringify(it.options), it.correctOptionId, it.explanation, it.hint ?? null, choices[it.id] as string, now,
+        it.prompt, JSON.stringify(it.options), it.correctOptionId, it.explanation, choices[it.id] as string, now,
       )
     }
     if (check) applyChecks(ctx, items, choices)

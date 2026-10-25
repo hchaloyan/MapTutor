@@ -5,4 +5,3 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // API limit per image
 // 32 MB request limit after base64 (4/3), with headroom for the prompt and thread.
 // ponytail: byte proxy for the token budget; count tokens if PDFs with many pages hit the 600-page or context limit
 export const MAX_PROJECT_BYTES = 20 * 1024 * 1024
-export const WEB_SEARCH_MAX_USES = 3 // default per-request cap; each study fixes its own at creation
