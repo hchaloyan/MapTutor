@@ -6,7 +6,21 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node",
+      "vite/client"
+    ],
+    "lib": [
+      "es2023",
+      "dom",
+      "dom.iterable"
+    ],
+    "jsx": "react-jsx"
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "scripts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
 }

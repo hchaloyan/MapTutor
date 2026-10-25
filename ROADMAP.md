@@ -20,10 +20,10 @@ Backend first, then frontend. Each component ends with something that runs and h
 
 | # | Component | What's in it | Needs | Status |
 |---|---|---|---|---|
-| 8 | Shell + projects | Vite + React app, BYOK key panel, projects list, project page (uploads, studies with mastery bars) | 1 | |
+| 8 | Shell + projects | Vite + React app, theme, welcome page, BYOK key panel, projects sidebar, project page (goals with mastery bars, files with uploads, links and Refresh) | 1, 7b | Done: [plan](docs/superpowers/plans/2026-10-25-shell-projects.md) |
 | 9 | Study view | Split pane, chat with Markdown + KaTeX, goal / quiz / approval cards, strand placeholder | 3–5 | |
 | 10 | Graph view | React Flow + dagre, state colors, current-node pulse, legend, tooltip, prerequisite banner, thread switching | 6 | |
-| 11 | Polish | Usage display, URL refresh button, web-search cost note | 7 | |
+| 11 | Polish | Usage popover, goal-complete card and confetti, doc updates (Refresh moved to 8; the web-search cost note became the search count in the usage popover) | 7 | |
 
 ## Decisions
 
