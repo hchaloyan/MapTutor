@@ -17,7 +17,7 @@
 
 ## Backend
 
-**Fastify and SQLite**, with uploads on local disk. SQLite is Node's built-in `node:sqlite` (Node 24+), so nothing needs a native build. It runs locally only, with no hosting for now. Cloudflare Workers + D1 + R2 stays possible later, since the schema is SQLite-flavored.
+**Fastify and SQLite**, with uploaded file bytes stored in SQLite. SQLite is Node's built-in `node:sqlite` (Node 24+), so nothing needs a native build. It runs locally only, with no hosting for now. Cloudflare Workers + D1 + R2 stays possible later, since the schema is SQLite-flavored.
 
 The backend:
 
@@ -36,12 +36,12 @@ The backend:
 
 | Kind | Handling |
 |---|---|
-| PDF / slides | Stored as-is and sent to Claude as a native PDF document block. Slides from PowerPoint are exported to PDF first; the UI accepts `.pdf` |
-| Images | Stored as-is and sent as image blocks (whiteboard photos, handwritten notes) |
+| PDF / slides | Stored as-is (bytes in SQLite) and sent to Claude as a native PDF document block. Slides from PowerPoint are exported to PDF first; the UI accepts `.pdf` |
+| Images | Stored as-is (bytes in SQLite) and sent as image blocks (whiteboard photos, handwritten notes) |
 | `.md` / `.txt` | Stored, with the text cached in `files.text_cache` |
-| URL | Fetched server-side once at upload, converted to Markdown, and stored in `text_cache`. A "Refresh" button refetches it |
+| URL | Fetched server-side once at upload. A PDF link is stored as a PDF; plain text is stored as-is; HTML is converted to Markdown by the side model. Text goes in `text_cache`. A "Refresh" button refetches it |
 
-Size limits per file and per project should be enforced so the cached context stays within the model's window.
+Size limits: 5 MB per image (the API limit) and 20 MB per project in total, so the files fit the 32 MB request limit after base64. Both live in `src/server/config.ts`.
 
 ## Caching and cost
 

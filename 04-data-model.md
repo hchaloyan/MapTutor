@@ -29,8 +29,8 @@ CREATE TABLE files (
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   kind        TEXT NOT NULL CHECK (kind IN ('pdf','image','text','url')),
   name        TEXT NOT NULL,
-  storage_key TEXT,          -- blob storage key (pdf/image/text)
-  url         TEXT,          -- for kind = 'url'
+  data        BLOB,          -- file bytes (pdf/image); NULL for text/url
+  url         TEXT,          -- source URL for imported files
   text_cache  TEXT,          -- extracted text for text/url; NULL for pdf/image (sent natively)
   created_at  INTEGER NOT NULL
 );

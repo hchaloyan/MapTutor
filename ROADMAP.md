@@ -7,7 +7,7 @@ Backend first, then frontend. Each component ends with something that runs and h
 | # | Component | What's in it | Needs | Status |
 |---|---|---|---|---|
 | 0 | Server skeleton | Fastify + SQLite, schema from [04](04-data-model.md), health route, key header never logged | — | Done: [plan](docs/superpowers/plans/2026-10-24-skeleton.md) |
-| 1 | Projects & files API | Project CRUD, uploads (PDF, image, md/txt, URL → Markdown), URL refresh, size limits per file and per project | 0 | |
+| 1 | Projects & files API | Project CRUD, uploads (PDF, image, md/txt, URL → Markdown), URL refresh, size limits per file and per project | 0 | Done: [plan](docs/superpowers/plans/2026-10-24-projects-files.md) |
 | 2 | Graph engine | Pure TS: `propose_graph` validation, initial states, transitions, `set_node_state` guards, weak-ancestor list, next-node selection | — | |
 | 3 | Agent loop | Context assembly with 2 cache breakpoints, tool loop with pause/resume on client tools, SSE, message persistence, tool-result route, `ask_user_question` | 0, 1 | |
 | 4 | Probe | `quiz` tool, server-side grading, `quiz_items` with strands, Probe → Plan switch | 3 | |

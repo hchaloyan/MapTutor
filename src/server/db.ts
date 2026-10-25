@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
+import { httpError } from './http'
 
 export const LOCAL_USER_ID = 'local'
 
@@ -22,8 +23,8 @@ CREATE TABLE IF NOT EXISTS files (
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   kind        TEXT NOT NULL CHECK (kind IN ('pdf','image','text','url')),
   name        TEXT NOT NULL,
-  storage_key TEXT,          -- blob storage key (pdf/image/text)
-  url         TEXT,          -- for kind = 'url'
+  data        BLOB,          -- file bytes (pdf/image); NULL for text/url
+  url         TEXT,          -- source URL for imported files
   text_cache  TEXT,          -- extracted text for text/url; NULL for pdf/image (sent natively)
   created_at  INTEGER NOT NULL
 );
@@ -92,4 +93,10 @@ export function openDb(path: string): DatabaseSync {
   db.exec(SCHEMA)
   db.prepare('INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)').run(LOCAL_USER_ID, Date.now())
   return db
+}
+
+export function requireProject(db: DatabaseSync, id: string) {
+  const project = db.prepare('SELECT id, name, created_at AS createdAt FROM projects WHERE id = ?').get(id)
+  if (!project) throw httpError(404, 'Project not found.')
+  return project
 }

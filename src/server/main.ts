@@ -4,4 +4,4 @@ import { openDb } from './db'
 
 mkdirSync('data', { recursive: true })
 const db = openDb(process.env.DB_PATH ?? 'data/maptutor.db')
-await buildApp(db, process.stdout).listen({ host: '127.0.0.1', port: 3001 })
+await buildApp({ db, logStream: process.stdout }).listen({ host: '127.0.0.1', port: 3001 })
